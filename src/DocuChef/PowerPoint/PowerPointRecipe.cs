@@ -1,214 +1,192 @@
-﻿using DocuChef.Utils;
-using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Packaging;
-using System.Text.RegularExpressions;
+﻿using DocumentFormat.OpenXml.Packaging;
 
 namespace DocuChef.PowerPoint;
 
 /// <summary>
-/// PowerPoint template engine implementation using DollarSignEngine
+/// Represents a PowerPoint template for document generation using DollarSignEngine for expression evaluation
 /// </summary>
-public partial class PowerPointRecipe : RecipeBase<PresentationDocument>
+public class PowerPointRecipe : RecipeBase
 {
-    private static readonly Regex SlideNoteRegex = new(@"@(?<directive>\w+):\s*(?<value>[^@\r\n]+)", RegexOptions.Compiled);
+    private readonly PowerPointOptions _options;
+    private readonly string _templatePath;
+    private PresentationDocument _presentationDocument;
 
     /// <summary>
-    /// Callback executed when the presentation is created
+    /// Creates a new PowerPoint template from a file
     /// </summary>
-    public Action<PresentationDocument>? OnPresentationCreated { get; set; }
-
-    /// <summary>
-    /// Creates a new PowerPoint recipe from the specified template
-    /// </summary>
-    public PowerPointRecipe(string templatePath, RecipeOptions options)
-        : base(templatePath, options)
+    public PowerPointRecipe(string templatePath, PowerPointOptions options = null)
     {
-        ReloadDocument();
+        if (string.IsNullOrEmpty(templatePath))
+            throw new ArgumentNullException(nameof(templatePath));
+
+        if (!File.Exists(templatePath))
+            throw new FileNotFoundException("Template file not found", templatePath);
+
+        _templatePath = templatePath;
+        _options = options ?? new PowerPointOptions();
+
+        Logger.Debug($"PowerPoint recipe initialized from file: {templatePath}");
+
+        if (_options.RegisterBuiltInFunctions)
+            RegisterBuiltInFunctions();
+
+        if (_options.RegisterGlobalVariables)
+            RegisterStandardGlobalVariables();
     }
 
     /// <summary>
-    /// Processes the PowerPoint template with the provided data
+    /// Creates a new PowerPoint template from a stream
     /// </summary>
-    protected override async Task ProcessTemplateAsync()
+    public PowerPointRecipe(Stream templateStream, PowerPointOptions options = null)
     {
+        if (templateStream == null)
+            throw new ArgumentNullException(nameof(templateStream));
+
+        _options = options ?? new PowerPointOptions();
+
+        // Create a temporary file to work with
+        _templatePath = ".pptx".GetTempFilePath();
+
         try
         {
-            if (Document == null)
-            {
-                throw new InvalidOperationException("Document is not initialized.");
-            }
+            Logger.Debug($"Creating temporary template file: {_templatePath}");
+            templateStream.CopyToFile(_templatePath);
 
-            // Process all slides
-            LoggingHelper.LogInformation("Processing slides");
-            await ProcessSlidesAsync();
+            if (_options.RegisterBuiltInFunctions)
+                RegisterBuiltInFunctions();
 
-            // Execute plugins
-            LoggingHelper.LogInformation("Executing plugins");
-            foreach (var plugin in Options.PowerPoint.Plugins)
-            {
-                plugin.Execute(Document, Data, Options);
-            }
+            if (_options.RegisterGlobalVariables)
+                RegisterStandardGlobalVariables();
 
-            // Update slide numbers if required
-            if (Options.PowerPoint.UpdateSlideNumbers)
-            {
-                LoggingHelper.LogInformation("Updating slide numbers");
-                await UpdateSlideNumbersAsync();
-            }
-
-            // Custom modifications via callback
-            if (OnPresentationCreated != null)
-            {
-                LoggingHelper.LogInformation("Executing presentation callback");
-                OnPresentationCreated(Document);
-            }
+            Logger.Debug("PowerPoint recipe initialized from stream");
         }
         catch (Exception ex)
         {
-            LoggingHelper.LogError("Error processing PowerPoint template", ex);
-            throw new DocuChefException($"Error processing PowerPoint template: {ex.Message}", ex);
+            Logger.Error("Failed to create temporary template file", ex);
+            throw new DocuChefException($"Failed to create temporary template file: {ex.Message}", ex);
         }
     }
 
     /// <summary>
-    /// Saves the PowerPoint document to the specified path
+    /// Adds a variable to the template
     /// </summary>
-    /// <summary>
-    /// Saves the PowerPoint document to the specified path
-    /// </summary>
-    protected override async Task SaveDocumentAsync(string outputPath)
+    public override void AddVariable(string name, object value)
     {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(name))
+            throw new ArgumentNullException(nameof(name));
+
+        Variables[name] = value;
+        Logger.Debug($"Added variable: {name}");
+    }
+
+    /// <summary>
+    /// Registers a custom function for PowerPoint processing
+    /// </summary>
+    public void RegisterFunction(PowerPointFunction function)
+    {
+        ThrowIfDisposed();
+
+        if (function == null)
+            throw new ArgumentNullException(nameof(function));
+
+        if (string.IsNullOrEmpty(function.Name))
+            throw new ArgumentException("Function name cannot be null or empty", nameof(function));
+
+        if (function.Handler == null)
+            throw new ArgumentException("Function handler cannot be null", nameof(function));
+
+        var functionName = function.Name;
+        Variables[$"ppt.{functionName}"] = function;
+        Logger.Debug($"Registered function: {functionName}");
+    }
+
+    /// <summary>
+    /// Registers built-in functions
+    /// </summary>
+    private void RegisterBuiltInFunctions()
+    {
+        // Register PowerPoint specific functions through PowerPointFunctions class
+        PowerPointFunctions.RegisterBuiltInFunctions(this);
+        Logger.Debug("Registered built-in PowerPoint functions");
+    }
+
+    /// <summary>
+    /// Generates the document from the template
+    /// </summary>
+    public PowerPointDocument Generate()
+    {
+        ThrowIfDisposed();
+
         try
         {
-            EnsureDirectoryExists(outputPath);
+            // Create a copy of the template to work with
+            string outputPath = ".pptx".GetTempFilePath();
+            Logger.Debug($"Creating output file: {outputPath}");
 
-            if (Document == null)
-            {
-                throw new InvalidOperationException("Document is not initialized.");
-            }
+            File.Copy(_templatePath, outputPath, true);
 
-            // Save as a copy following the same pattern as in WordRecipe class
-            await Task.Run(() => {
-                // We need to use the OpenXML Save method to write to the output file
-                // Create a temporary file first
-                var tempPath = Path.GetTempFileName() + ".pptx";
+            // Open the presentation
+            _presentationDocument = PresentationDocument.Open(outputPath, true);
+            Logger.Debug("Opened presentation document for editing");
 
-                // Save current document to temp file
-                Document.Save(); // Save any changes in memory
+            // Process the template with DollarSignEngine-based processor
+            var processor = new PowerPointProcessor(_presentationDocument, _options);
+            Logger.Info("Processing PowerPoint template with DollarSignEngine...");
 
-                // Create a new document at the target location
-                using (var sourceDoc = Document)
-                using (var destDoc = PresentationDocument.Create(tempPath, PresentationDocumentType.Presentation))
-                {
-                    // Copy all parts from source to destination
-                    foreach (var part in sourceDoc.GetAllParts())
-                    {
-                        destDoc.AddPart(part);
-                    }
+            // Extract PowerPoint functions from variables
+            var powerPointFunctions = Variables
+                .Where(v => v.Key.StartsWith("ppt.") && v.Value is PowerPointFunction)
+                .ToDictionary(
+                    v => v.Key.Substring(4), // Remove "ppt." prefix
+                    v => v.Value as PowerPointFunction
+                );
 
-                    // Save the new document
-                    destDoc.Save();
-                }
+            // Process the template
+            processor.Process(Variables, GlobalVariables, powerPointFunctions);
 
-                // Move the file to the target location
-                if (File.Exists(outputPath))
-                {
-                    File.Delete(outputPath);
-                }
-                File.Move(tempPath, outputPath);
-
-                // Reopen the original document
-                Document = PresentationDocument.Open(TemplatePath, false);
-
-                LoggingHelper.LogInformation($"Document saved to: {outputPath}");
-            });
+            // Return the generated document
+            Logger.Info("PowerPoint document generated successfully");
+            return new PowerPointDocument(_presentationDocument, outputPath);
         }
         catch (Exception ex)
         {
-            LoggingHelper.LogError("Error saving PowerPoint document", ex);
-            throw new DocuChefException($"Error saving PowerPoint document: {ex.Message}", ex);
+            _presentationDocument?.Dispose();
+            Logger.Error("Failed to generate PowerPoint document", ex);
+            throw new DocuChefException($"Failed to generate PowerPoint document: {ex.Message}", ex);
         }
     }
 
     /// <summary>
-    /// Reloads the PowerPoint document from the template
-    /// </summary>
-    protected override void ReloadDocument()
-    {
-        try
-        {
-            if (Document != null)
-            {
-                Document.Dispose();
-                Document = null;
-            }
-
-            // Use OpenSettings to handle package constraints
-            var openSettings = new OpenSettings
-            {
-                AutoSave = false
-            };
-
-            Document = PresentationDocument.Open(TemplatePath, false, openSettings);
-            LoggingHelper.LogInformation($"PowerPoint document loaded: {TemplatePath}");
-
-            // Verify that document has required parts
-            if (Document.PresentationPart == null)
-            {
-                throw new InvalidOperationException("Presentation part is missing from the document.");
-            }
-
-            if (Document.PresentationPart.Presentation == null)
-            {
-                throw new InvalidOperationException("Presentation is missing from the presentation part.");
-            }
-        }
-        catch (Exception ex)
-        {
-            LoggingHelper.LogError("Error loading PowerPoint template", ex);
-            throw new DocuChefException($"Error loading PowerPoint template: {ex.Message}", ex);
-        }
-    }
-
-    /// <summary>
-    /// Async dispose implementation
-    /// </summary>
-    protected override async ValueTask DisposeAsyncCore()
-    {
-        if (Document != null)
-        {
-            await Task.Run(() => {
-                try
-                {
-                    Document.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    LoggingHelper.LogWarning($"Error during document disposal: {ex.Message}");
-                }
-                Document = null;
-            });
-        }
-
-        await base.DisposeAsyncCore();
-    }
-
-    /// <summary>
-    /// Dispose pattern implementation
+    /// Disposes resources
     /// </summary>
     protected override void Dispose(bool disposing)
     {
-        if (disposing && Document != null)
+        if (IsDisposed) return;
+
+        if (disposing)
         {
             try
             {
-                Document.Dispose();
+                _presentationDocument?.Dispose();
+                Logger.Debug("Presentation document disposed");
+
+                // Delete temp file if created from stream and option is set
+                if (_options.CleanupTemporaryFiles &&
+                    _templatePath != null &&
+                    _templatePath.Contains("DocuChef_") &&
+                    File.Exists(_templatePath))
+                {
+                    File.Delete(_templatePath);
+                    Logger.Debug($"Temporary file deleted: {_templatePath}");
+                }
             }
             catch (Exception ex)
             {
-                LoggingHelper.LogWarning($"Error during document disposal: {ex.Message}");
+                Logger.Error("Error disposing PowerPoint recipe resources", ex);
+                // Ignore disposal errors
             }
-            Document = null;
         }
 
         base.Dispose(disposing);

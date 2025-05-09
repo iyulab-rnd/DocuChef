@@ -1,18 +1,17 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ClosedXML.Report" Version="0.2.12-rc" />
     <PackageReference Include="DollarSignEngine" Version="1.1.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Excel\Plugins\" />
+    <ProjectReference Include="..\..\..\ClosedXML.Report.XLCustom\src\ClosedXML.Report.XLCustom\ClosedXML.Report.XLCustom.csproj" />
   </ItemGroup>
 
 </Project>

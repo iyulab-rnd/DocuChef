@@ -1,207 +1,181 @@
 ﻿using ClosedXML.Excel;
-using ClosedXML.Report;
+using ClosedXML.Report.XLCustom;
+using DocuChef.Extensions;
+using DocuChef.Logging;
+
 namespace DocuChef.Excel;
 
-public class ExcelRecipe : RecipeBase<IXLWorkbook>
+/// <summary>
+/// Represents an Excel template for document generation
+/// </summary>
+public class ExcelRecipe : RecipeBase
 {
-    private XLTemplate _template;
+    private readonly ExcelOptions _options;
+    private readonly XLCustomTemplate _template;
+    private bool _isGenerated;
 
     /// <summary>
-    /// Creates a new Excel recipe from the specified template
+    /// Creates a new Excel template from a file
     /// </summary>
-    public ExcelRecipe(string templatePath, RecipeOptions options)
-        : base(templatePath, options)
+    public ExcelRecipe(string templatePath, ExcelOptions options = null)
     {
+        if (string.IsNullOrEmpty(templatePath))
+            throw new ArgumentNullException(nameof(templatePath));
+
+        if (!File.Exists(templatePath))
+            throw new FileNotFoundException("Template file not found", templatePath);
+
+        _options = options ?? new ExcelOptions();
+
         try
         {
-            _template = new XLTemplate(templatePath);
-            LoggingHelper.LogInformation($"Excel template loaded: {templatePath}");
+            Logger.Debug($"Initializing Excel template from {templatePath}");
+            _template = new XLCustomTemplate(templatePath, _options.TemplateOptions);
+
+            InitializeTemplate();
         }
         catch (Exception ex)
         {
-            LoggingHelper.LogError("Error initializing Excel recipe", ex);
-            throw;
+            Logger.Error($"Failed to initialize Excel template from {templatePath}", ex);
+            throw new DocuChefException($"Failed to initialize Excel template: {ex.Message}", ex);
         }
     }
 
     /// <summary>
-    /// Process the template with the provided data
+    /// Creates a new Excel template from a stream
     /// </summary>
-    protected override async Task ProcessTemplateAsync()
+    public ExcelRecipe(Stream templateStream, ExcelOptions options = null)
     {
+        if (templateStream == null)
+            throw new ArgumentNullException(nameof(templateStream));
+
+        _options = options ?? new ExcelOptions();
+
         try
         {
-            LoggingHelper.LogInformation("Processing Excel template");
+            Logger.Debug("Initializing Excel template from stream");
+            _template = new XLCustomTemplate(templateStream, _options.TemplateOptions);
 
-            // 데이터를 직접 템플릿에 추가
-            // ClosedXML.Report는 이미 dynamic 객체를 잘 처리함
-            // 변환 과정을 단순화
-            _template.AddVariable(Data);
+            InitializeTemplate();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to initialize Excel template from stream", ex);
+            throw new DocuChefException($"Failed to initialize Excel template: {ex.Message}", ex);
+        }
+    }
 
-            // 템플릿 생성
+    /// <summary>
+    /// Initialize the template with built-in functions and global variables
+    /// </summary>
+    private void InitializeTemplate()
+    {
+        if (_options.RegisterBuiltInFunctions)
+        {
+            _template.RegisterBuiltIns();
+            Logger.Debug("Registered built-in functions for Excel template");
+        }
+
+        if (_options.RegisterGlobalVariables)
+        {
+            RegisterStandardGlobalVariables();
+            Logger.Debug("Registered global variables for Excel template");
+        }
+    }
+
+    /// <summary>
+    /// Adds a variable to the template
+    /// </summary>
+    public override void AddVariable(string name, object value)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(name))
+            throw new ArgumentNullException(nameof(name));
+
+        try
+        {
+            Logger.Debug($"Adding variable '{name}' to Excel template");
+            _template.AddVariable(name, value);
+            Variables[name] = value;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Failed to add variable '{name}'", ex);
+            throw new DocuChefException($"Failed to add variable '{name}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Registers a custom function for cell processing
+    /// </summary>
+    public void RegisterFunction(string name, Action<IXLCell, object, string[]> function)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(name))
+            throw new ArgumentNullException(nameof(name));
+
+        if (function == null)
+            throw new ArgumentNullException(nameof(function));
+
+        try
+        {
+            // Convert to XLFunctionHandler - which is what XLCustomTemplate.RegisterFunction expects
+            XLFunctionHandler handler = (cell, value, parameters) => function(cell, value, parameters);
+            _template.RegisterFunction(name, handler);
+            Logger.Debug($"Registered function '{name}' for Excel template");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Failed to register function '{name}'", ex);
+            throw new DocuChefException($"Failed to register function '{name}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Generates the document from the template
+    /// </summary>
+    public ExcelDocument Generate()
+    {
+        ThrowIfDisposed();
+
+        try
+        {
+            Logger.Debug("Generating Excel document from template");
             _template.Generate();
+            _isGenerated = true;
 
-            // 문서 참조 설정
-            Document = _template.Workbook;
-
-            // Excel 옵션 적용
-            if (Options?.Excel != null)
+            // Get the workbook from the template
+            var workbook = _template.Workbook;
+            if (workbook == null)
             {
-                ApplyExcelOptions(Document);
+                throw new DocuChefException("Failed to retrieve workbook from template after generation.");
             }
+
+            Logger.Info("Excel document generated successfully");
+            return new ExcelDocument(workbook);
         }
         catch (Exception ex)
         {
-            LoggingHelper.LogError("Error processing Excel template", ex);
-            throw new TemplateException($"Error processing Excel template: {ex.Message}", ex);
+            Logger.Error("Failed to generate Excel document", ex);
+            throw new DocuChefException($"Failed to generate Excel document: {ex.Message}", ex);
         }
     }
 
     /// <summary>
-    /// Register all named ranges in the template
-    /// </summary>
-    private void RegisterDefinedNames()
-    {
-        try
-        {
-            foreach (var range in _template.Workbook.DefinedNames)
-            {
-                try
-                {
-                    // Try to find and use the correct method to register ranges
-                    var methodInfo = _template.GetType().GetMethod("RegisterRange",
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-
-                    if (methodInfo != null)
-                    {
-                        methodInfo.Invoke(_template, new object[] { range.Name });
-                        LoggingHelper.LogInformation($"Registered range: {range.Name}");
-                        continue;
-                    }
-
-                    // Alternative approach if RegisterRange is not available
-                    var rangeObj = _template.Workbook.NamedRange(range.Name);
-                    if (rangeObj != null)
-                    {
-                        // Add as a variable instead
-                        _template.AddVariable(range.Name, rangeObj);
-                        LoggingHelper.LogInformation($"Added range as variable: {range.Name}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LoggingHelper.LogWarning($"Failed to register range {range.Name}: {ex.Message}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            LoggingHelper.LogWarning($"Error registering ranges: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Convert dictionary data to an anonymous object for ClosedXML.Report
-    /// </summary>
-    private object ConvertToAnonymousObject(Dictionary<string, object> data)
-    {
-        // Create a dynamic ExpandoObject for better template binding
-        dynamic result = new System.Dynamic.ExpandoObject();
-        var resultDict = (IDictionary<string, object>)result;
-
-        // Copy data to ExpandoObject
-        foreach (var item in data)
-        {
-            resultDict[item.Key] = item.Value;
-            LoggingHelper.LogInformation($"Added data: {item.Key}");
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Apply Excel-specific options to the workbook
-    /// </summary>
-    private void ApplyExcelOptions(IXLWorkbook workbook)
-    {
-        if (workbook == null) return;
-
-        try
-        {
-            // Apply autofit columns if enabled
-            if (Options.Excel.AutoFitColumns)
-            {
-                foreach (var worksheet in workbook.Worksheets)
-                {
-                    worksheet.Columns().AdjustToContents();
-                }
-                LoggingHelper.LogInformation("Applied auto-fit columns");
-            }
-
-            // Execute plugins if any
-            foreach (var plugin in Options.Excel.Plugins)
-            {
-                plugin.Execute(workbook, Data, Options);
-            }
-        }
-        catch (Exception ex)
-        {
-            LoggingHelper.LogWarning($"Failed to apply Excel options: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Save Excel document to the specified path
-    /// </summary>
-    protected override async Task SaveDocumentAsync(string outputPath)
-    {
-        try
-        {
-            EnsureDirectoryExists(outputPath);
-
-            if (Document == null)
-            {
-                throw new InvalidOperationException("Document is not initialized.");
-            }
-
-            await Task.Run(() => Document.SaveAs(outputPath));
-            LoggingHelper.LogInformation($"Document saved to: {outputPath}");
-        }
-        catch (Exception ex)
-        {
-            LoggingHelper.LogError("Error saving Excel document", ex);
-            throw new DocuChefException($"Error saving Excel document: {ex.Message}", ex);
-        }
-    }
-
-    /// <summary>
-    /// Reload document from template
-    /// </summary>
-    protected override void ReloadDocument()
-    {
-        try
-        {
-            _template?.Dispose();
-            _template = new XLTemplate(TemplatePath);
-            Document = _template.Workbook;
-            LoggingHelper.LogInformation($"Excel document reloaded: {TemplatePath}");
-        }
-        catch (Exception ex)
-        {
-            LoggingHelper.LogError("Error reloading Excel template", ex);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Dispose resources
+    /// Disposes resources
     /// </summary>
     protected override void Dispose(bool disposing)
     {
+        if (IsDisposed) return;
+
         if (disposing)
         {
             _template?.Dispose();
+            Logger.Debug("Excel template disposed");
         }
+
         base.Dispose(disposing);
     }
 }

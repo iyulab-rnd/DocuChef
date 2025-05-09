@@ -1,10 +1,10 @@
 [라이브러리 작성지침]
+- Excel 은 ClosedXML.Report.XLCustom 를 사용하고 Word, PPT 는 DollarSignEngine 을 사용
+- ClosedXML.Report, DollarSignEngine 가 잘 작동하도록 사용법에 맞게 데이터를 준비하고 Resolve하는데 집중하고 처리를 위임하는 방식으로 최대한 간결하게 작성 해야 함.
 - 범용 라이브러리로 하드코딩으로 작성하지 않고, 구성가능하도록 작성
-- 코드, 주석은 영문으로 작성
 - 주석은 <summary> 태그만 작성하고 <params>,<return> 등 다른 태그는 작성하지 않음
 - Helpers, Extensions 등 공통함수를 사용하고 간결하게 코드 작성
 - 코드가 500줄을 넘어가면 partial classs 로 {ClassName}.{Regions}.cs 으로 나누어 작성
 - 개발 단계로 하위호환을 고려하지 않음, 문제해결을 위해 필요한 경우 억지로 해결하지말고 더 나은 방법을 제안
-- ClosedXML.Report, DollarSignEngine 가 잘 작동하도록 사용법에 맞게 데이터를 준비하고 Resolve하는데 집중하고 처리를 위임하는 방식으로 최대한 간결하게 작성 해야 함.
-
-(답변은 한국어로)
+- 코드, 주석은 영문으로 작성 (답변은 한국어로)
+- Word 는 현재 TBD 단계로 작성하지 않음

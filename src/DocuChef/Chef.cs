@@ -1,215 +1,261 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Globalization;
-using System.Reflection;
-using DocuChef.Excel;
+﻿using DocuChef.Excel;
+using DocuChef.Extensions;
+using DocuChef.Logging;
 using DocuChef.PowerPoint;
-using DocuChef.Word;
-using DocuChef.Utils;
 
-namespace DocuChef
+namespace DocuChef;
+
+/// <summary>
+/// Main entry point for DocuChef document generation
+/// </summary>
+public class Chef : IDisposable
 {
+    private readonly RecipeOptions _options;
+    private readonly Dictionary<string, object> _globalData = new();
+    private bool _isDisposed;
+
     /// <summary>
-    /// Main entry point for the DocuChef library - creates template engines for different document types
+    /// Creates a new DocuChef instance with default options
     /// </summary>
-    public class Chef
+    public Chef() : this(new RecipeOptions())
     {
-        private readonly Dictionary<string, object> _globalSettings;
-        private readonly LogCallback? _logCallback;
+    }
 
-        /// <summary>
-        /// Creates a new instance of DocuChef
-        /// </summary>
-        public Chef()
+    /// <summary>
+    /// Creates a new DocuChef instance with the specified options
+    /// </summary>
+    public Chef(RecipeOptions options)
+    {
+        _options = options ?? new RecipeOptions();
+
+        // Set up logging based on options
+        Logger.MinimumLevel = _options.EnableVerboseLogging ?
+            Logger.LogLevel.Debug : Logger.LogLevel.Warning;
+
+        Logger.Debug("DocuChef initialized");
+    }
+
+    /// <summary>
+    /// Loads a template from the specified path
+    /// </summary>
+    public IRecipe LoadTemplate(string templatePath)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(templatePath))
+            throw new ArgumentNullException(nameof(templatePath));
+
+        if (!File.Exists(templatePath))
+            throw new FileNotFoundException("Template file not found", templatePath);
+
+        string extension = Path.GetExtension(templatePath).ToLowerInvariant();
+
+        Logger.Debug($"Loading template from {templatePath} with extension {extension}");
+
+        return extension switch
         {
-            _globalSettings = new Dictionary<string, object>();
-        }
+            ".xlsx" => LoadExcelTemplate(templatePath),
+            ".pptx" => LoadPowerPointTemplate(templatePath),
+            // Future: .docx support
+            _ => throw new DocuChefException($"Unsupported file format: {extension}")
+        };
+    }
 
-        /// <summary>
-        /// Creates a new instance of DocuChef with logging callback
-        /// </summary>
-        public Chef(LogCallback logCallback) : this()
+    /// <summary>
+    /// Loads an Excel template from the specified path
+    /// </summary>
+    public ExcelRecipe LoadExcelTemplate(string templatePath, ExcelOptions options = null)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(templatePath))
+            throw new ArgumentNullException(nameof(templatePath));
+
+        if (!File.Exists(templatePath))
+            throw new FileNotFoundException("Template file not found", templatePath);
+
+        try
         {
-            _logCallback = logCallback;
-            LoggingHelper.SetLogCallback(logCallback);
-        }
+            var recipe = new ExcelRecipe(templatePath, options ?? _options.Excel);
 
-        /// <summary>
-        /// Creates a new instance of DocuChef with global settings
-        /// </summary>
-        public Chef(Dictionary<string, object> globalSettings)
-        {
-            _globalSettings = globalSettings ?? new Dictionary<string, object>();
-        }
-
-        /// <summary>
-        /// Creates a new instance of DocuChef with global settings and logging callback
-        /// </summary>
-        public Chef(Dictionary<string, object> globalSettings, LogCallback logCallback)
-        {
-            _globalSettings = globalSettings ?? new Dictionary<string, object>();
-            _logCallback = logCallback;
-            LoggingHelper.SetLogCallback(logCallback);
-        }
-
-        /// <summary>
-        /// Loads a document template based on its file extension
-        /// </summary>
-        public IRecipe LoadRecipe(string templatePath, RecipeOptions? options = null)
-        {
-            ArgumentNullException.ThrowIfNull(templatePath);
-
-            if (!File.Exists(templatePath))
-                throw new FileNotFoundException($"Template file not found: {templatePath}");
-
-            var extension = Path.GetExtension(templatePath).ToLowerInvariant();
-
-            return extension switch
+            // Add global data to the recipe
+            foreach (var kvp in _globalData)
             {
-                ".xlsx" => LoadExcelRecipe(templatePath, options),
-                ".docx" => LoadWordRecipe(templatePath, options),
-                ".pptx" => LoadPowerPointRecipe(templatePath, options),
-                _ => throw new NotSupportedException($"Unsupported file format: {extension}")
-            };
-        }
-
-        /// <summary>
-        /// Loads an Excel template file
-        /// </summary>
-        public ExcelRecipe LoadExcelRecipe(string templatePath, RecipeOptions? options = null)
-        {
-            var finalOptions = PrepareOptions(options);
-            LoggingHelper.LogInformation($"Loading Excel recipe: {templatePath}");
-            return new ExcelRecipe(templatePath, finalOptions);
-        }
-
-        /// <summary>
-        /// Loads a Word template file
-        /// </summary>
-        public WordRecipe LoadWordRecipe(string templatePath, RecipeOptions? options = null)
-        {
-            var finalOptions = PrepareOptions(options);
-            LoggingHelper.LogInformation($"Loading Word recipe: {templatePath}");
-            return new WordRecipe(templatePath, finalOptions);
-        }
-
-        /// <summary>
-        /// Loads a PowerPoint template file
-        /// </summary>
-        public PowerPointRecipe LoadPowerPointRecipe(string templatePath, RecipeOptions? options = null)
-        {
-            var finalOptions = PrepareOptions(options);
-            LoggingHelper.LogInformation($"Loading PowerPoint recipe: {templatePath}");
-            return new PowerPointRecipe(templatePath, finalOptions);
-        }
-
-        /// <summary>
-        /// Adds or updates a global setting
-        /// </summary>
-        /// <param name="key">Setting key</param>
-        /// <param name="value">Setting value</param>
-        /// <returns>Current DocuChef instance for chaining</returns>
-        public Chef AddGlobalSetting(string key, object value)
-        {
-            _globalSettings[key] = value;
-            LoggingHelper.LogInformation($"Added global setting: {key}");
-            return this;
-        }
-
-        /// <summary>
-        /// Gets a global setting
-        /// </summary>
-        /// <param name="key">Setting key</param>
-        /// <returns>Setting value or null if not found</returns>
-        public object? GetGlobalSetting(string key)
-        {
-            return _globalSettings.TryGetValue(key, out var value) ? value : null;
-        }
-
-        /// <summary>
-        /// Sets the logging callback for this DocuChef instance
-        /// </summary>
-        /// <param name="logCallback">New logging callback</param>
-        /// <returns>Current DocuChef instance for chaining</returns>
-        public Chef SetLogCallback(LogCallback logCallback)
-        {
-            LoggingHelper.SetLogCallback(logCallback);
-            return this;
-        }
-
-        /// <summary>
-        /// Prepares options and applies global settings and logging callback
-        /// </summary>
-        /// <param name="options">Original options (can be null)</param>
-        /// <returns>Prepared options</returns>
-        private RecipeOptions PrepareOptions(RecipeOptions? options)
-        {
-            var finalOptions = options ?? new RecipeOptions();
-
-            // Apply logging callback
-            if (_logCallback != null && finalOptions.LogCallback == null)
-            {
-                finalOptions.LogCallback = _logCallback;
-                LoggingHelper.LogInformation("Applied global logging callback to options");
+                recipe.AddVariable(kvp.Key, kvp.Value);
             }
 
-            // Apply global settings
-            ApplyGlobalSettings(finalOptions);
-
-            return finalOptions;
+            return recipe;
         }
-
-        /// <summary>
-        /// Applies global settings to options
-        /// </summary>
-        /// <param name="options">Options to apply settings to</param>
-        private void ApplyGlobalSettings(RecipeOptions options)
+        catch (Exception ex) when (!(ex is DocuChefException))
         {
-            // Apply key global settings to recipe options
-            foreach (var setting in _globalSettings)
+            Logger.Error($"Failed to load Excel template from {templatePath}", ex);
+            throw new DocuChefException($"Failed to load Excel template: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Loads an Excel template from a stream
+    /// </summary>
+    public ExcelRecipe LoadExcelTemplate(Stream templateStream, ExcelOptions options = null)
+    {
+        ThrowIfDisposed();
+
+        if (templateStream == null)
+            throw new ArgumentNullException(nameof(templateStream));
+
+        try
+        {
+            var recipe = new ExcelRecipe(templateStream, options ?? _options.Excel);
+
+            // Add global data to the recipe
+            foreach (var kvp in _globalData)
             {
-                LoggingHelper.LogInformation($"Applying global setting: {setting.Key}");
-
-                switch (setting.Key)
-                {
-                    case "DefaultCulture" when setting.Value is CultureInfo cultureInfo:
-                        options.CultureInfo = cultureInfo;
-                        break;
-                    case "DefaultNullDisplay" when setting.Value is string nullDisplayStr:
-                        options.NullDisplayString = nullDisplayStr;
-                        break;
-                    default:
-                        // Try to set property by reflection if it exists
-                        var property = options.GetType().GetProperty(setting.Key);
-                        if (property != null && property.CanWrite &&
-                            property.PropertyType.IsAssignableFrom(setting.Value.GetType()))
-                        {
-                            property.SetValue(options, setting.Value);
-                            LoggingHelper.LogInformation($"Set {setting.Key} from global settings");
-                        }
-                        break;
-                }
+                recipe.AddVariable(kvp.Key, kvp.Value);
             }
+
+            return recipe;
+        }
+        catch (Exception ex) when (!(ex is DocuChefException))
+        {
+            Logger.Error("Failed to load Excel template from stream", ex);
+            throw new DocuChefException($"Failed to load Excel template from stream: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Loads a PowerPoint template from the specified path
+    /// </summary>
+    public PowerPointRecipe LoadPowerPointTemplate(string templatePath, PowerPointOptions options = null)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(templatePath))
+            throw new ArgumentNullException(nameof(templatePath));
+
+        if (!File.Exists(templatePath))
+            throw new FileNotFoundException("Template file not found", templatePath);
+
+        try
+        {
+            var recipe = new PowerPointRecipe(templatePath, options ?? _options.PowerPoint);
+
+            // Add global data to the recipe
+            foreach (var kvp in _globalData)
+            {
+                recipe.AddVariable(kvp.Key, kvp.Value);
+            }
+
+            return recipe;
+        }
+        catch (Exception ex) when (!(ex is DocuChefException))
+        {
+            Logger.Error($"Failed to load PowerPoint template from {templatePath}", ex);
+            throw new DocuChefException($"Failed to load PowerPoint template: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Loads a PowerPoint template from a stream
+    /// </summary>
+    public PowerPointRecipe LoadPowerPointTemplate(Stream templateStream, PowerPointOptions options = null)
+    {
+        ThrowIfDisposed();
+
+        if (templateStream == null)
+            throw new ArgumentNullException(nameof(templateStream));
+
+        try
+        {
+            var recipe = new PowerPointRecipe(templateStream, options ?? _options.PowerPoint);
+
+            // Add global data to the recipe
+            foreach (var kvp in _globalData)
+            {
+                recipe.AddVariable(kvp.Key, kvp.Value);
+            }
+
+            return recipe;
+        }
+        catch (Exception ex) when (!(ex is DocuChefException))
+        {
+            Logger.Error("Failed to load PowerPoint template from stream", ex);
+            throw new DocuChefException($"Failed to load PowerPoint template from stream: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Adds data to the global registry
+    /// </summary>
+    public void AddData(object data)
+    {
+        ThrowIfDisposed();
+
+        if (data == null)
+            throw new ArgumentNullException(nameof(data));
+
+        // Add all properties of the object to the global data dictionary
+        var properties = data.GetProperties();
+        foreach (var kvp in properties)
+        {
+            _globalData[kvp.Key] = kvp.Value;
         }
 
-        /// <summary>
-        /// Factory method: Creates a default DocuChef instance
-        /// </summary>
-        /// <returns>A new DocuChef instance</returns>
-        public static Chef Create()
+        Logger.Debug($"Added {properties.Count} properties to global data from object");
+    }
+
+    /// <summary>
+    /// Adds named data to the global registry
+    /// </summary>
+    public void AddData(string key, object data)
+    {
+        ThrowIfDisposed();
+
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentNullException(nameof(key));
+
+        _globalData[key] = data;
+        Logger.Debug($"Added global data with key: {key}");
+    }
+
+    /// <summary>
+    /// Clears all data from the global registry
+    /// </summary>
+    public void ClearData()
+    {
+        ThrowIfDisposed();
+        _globalData.Clear();
+        Logger.Debug("Cleared global data");
+    }
+
+    /// <summary>
+    /// Disposes resources
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Disposes resources
+    /// </summary>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_isDisposed) return;
+
+        if (disposing)
         {
-            return new Chef();
+            // Dispose any resources here
+            _globalData.Clear();
+            Logger.Debug("Chef disposed");
         }
 
-        /// <summary>
-        /// Factory method: Creates a DocuChef instance with logging enabled
-        /// </summary>
-        /// <param name="logCallback">Logging callback</param>
-        /// <returns>A new DocuChef instance</returns>
-        public static Chef CreateWithLogging(LogCallback logCallback)
-        {
-            return new Chef(logCallback);
-        }
+        _isDisposed = true;
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_isDisposed)
+            throw new ObjectDisposedException(nameof(Chef));
     }
 }

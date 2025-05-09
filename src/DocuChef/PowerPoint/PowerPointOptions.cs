@@ -1,32 +1,52 @@
 ﻿namespace DocuChef.PowerPoint;
 
 /// <summary>
-/// Configuration options specific to PowerPoint templates
+/// Options for customizing PowerPoint template processing
 /// </summary>
 public class PowerPointOptions
 {
     /// <summary>
-    /// Plugins for PowerPoint presentation processing
+    /// Whether to automatically register built-in functions
     /// </summary>
-    public List<IPowerPointPlugin> Plugins { get; set; } = [];
+    public bool RegisterBuiltInFunctions { get; set; } = true;
 
     /// <summary>
-    /// Whether to update slide numbers
+    /// Whether to populate global variables
     /// </summary>
-    public bool UpdateSlideNumbers { get; set; } = true;
+    public bool RegisterGlobalVariables { get; set; } = true;
 
     /// <summary>
-    /// Whether to include hidden slides in the output
+    /// Whether to create new slides when a slide-foreach directive exceeds available slides
     /// </summary>
-    public bool IncludeHiddenSlides { get; set; } = false;
+    public bool CreateNewSlidesWhenNeeded { get; set; } = true;
 
     /// <summary>
-    /// Whether to support dollar sign syntax (${variable})
+    /// Maximum number of slides that can be generated from a single template slide
     /// </summary>
-    public bool SupportDollarSignSyntax { get; set; } = true;
+    public int MaxSlidesFromTemplate { get; set; } = 100;
 
     /// <summary>
-    /// Additional namespaces to include in expression evaluation
+    /// Default image width in pixels when not specified
     /// </summary>
-    public List<string> AdditionalNamespaces { get; set; } = [];
+    public int DefaultImageWidth { get; set; } = 300;
+
+    /// <summary>
+    /// Default image height in pixels when not specified
+    /// </summary>
+    public int DefaultImageHeight { get; set; } = 200;
+
+    /// <summary>
+    /// Whether to preserve aspect ratio when resizing images by default
+    /// </summary>
+    public bool PreserveImageAspectRatio { get; set; } = true;
+
+    /// <summary>
+    /// Whether to delete temporary files when disposing
+    /// </summary>
+    public bool CleanupTemporaryFiles { get; set; } = true;
+
+    /// <summary>
+    /// Maximum number of iterations for foreach directive
+    /// </summary>
+    public int MaxIterationItems { get; set; } = 1000;
 }

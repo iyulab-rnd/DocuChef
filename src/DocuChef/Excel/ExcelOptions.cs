@@ -1,19 +1,38 @@
-﻿namespace DocuChef.Excel;
+﻿using ClosedXML.Report.XLCustom;
 
+namespace DocuChef.Excel;
+
+/// <summary>
+/// Options for customizing Excel template processing
+/// </summary>
 public class ExcelOptions
 {
     /// <summary>
-    /// Plugins for Excel document processing
+    /// Options for the underlying XLCustomTemplate
     /// </summary>
-    public List<IExcelPlugin> Plugins { get; set; } = new List<IExcelPlugin>();
+    public XLCustomTemplateOptions TemplateOptions { get; set; } = new XLCustomTemplateOptions
+    {
+        UseGlobalRegistry = true,
+        RegisterBuiltInFunctions = true
+    };
 
     /// <summary>
-    /// Whether to adjust column widths to content
+    /// Whether to automatically register built-in functions
     /// </summary>
-    public bool AutoFitColumns { get; set; } = false;
+    public bool RegisterBuiltInFunctions { get; set; } = true;
 
     /// <summary>
-    /// Whether to process cells with formulas
+    /// Whether to populate global variables
     /// </summary>
-    public bool ProcessFormulaCells { get; set; } = true;
+    public bool RegisterGlobalVariables { get; set; } = true;
+
+    /// <summary>
+    /// Whether to enable verbose logging for debugging
+    /// </summary>
+    public bool EnableVerboseLogging { get; set; } = false;
+
+    /// <summary>
+    /// Whether to throw exceptions for missing variables instead of showing placeholders
+    /// </summary>
+    public bool ThrowOnMissingVariable { get; set; } = false;
 }

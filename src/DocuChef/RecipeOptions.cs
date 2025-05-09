@@ -1,35 +1,18 @@
-﻿using DocuChef.Excel;
+﻿using System.Globalization;
+using DocuChef.Excel;
 using DocuChef.PowerPoint;
-using DocuChef.Word;
-using System.Globalization;
 
+namespace DocuChef;
+
+/// <summary>
+/// Options for document generation
+/// </summary>
 public class RecipeOptions
 {
     /// <summary>
-    /// Culture info used for formatting operations
+    /// Culture info for formatting numbers, dates, etc.
     /// </summary>
     public CultureInfo CultureInfo { get; set; } = CultureInfo.CurrentCulture;
-
-    /// <summary>
-    /// String to display when a null value is encountered
-    /// </summary>
-    public string NullDisplayString { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Custom variable resolver for variable handling
-    /// </summary>
-    public Func<string, Dictionary<string, object>, object?>? VariableResolver { get; set; }
-
-    /// <summary>
-    /// Custom formatters for specialized data formatting
-    /// </summary>
-    public Dictionary<string, Func<object, string, string>> CustomFormatters { get; set; } =
-        new Dictionary<string, Func<object, string, string>>();
-
-    /// <summary>
-    /// Log callback for library logging
-    /// </summary>
-    public LogCallback? LogCallback { get; set; }
 
     /// <summary>
     /// Excel-specific options
@@ -37,12 +20,27 @@ public class RecipeOptions
     public ExcelOptions Excel { get; set; } = new ExcelOptions();
 
     /// <summary>
-    /// Word-specific options
-    /// </summary>
-    public WordOptions Word { get; set; } = new WordOptions();
-
-    /// <summary>
     /// PowerPoint-specific options
     /// </summary>
     public PowerPointOptions PowerPoint { get; set; } = new PowerPointOptions();
+
+    /// <summary>
+    /// Word-specific options (TBD)
+    /// </summary>
+    // public WordOptions Word { get; set; } = new WordOptions();
+
+    /// <summary>
+    /// Whether to enable verbose logging
+    /// </summary>
+    public bool EnableVerboseLogging { get; set; } = false;
+
+    /// <summary>
+    /// Whether to throw exceptions for missing variables instead of showing placeholders
+    /// </summary>
+    public bool ThrowOnMissingVariable { get; set; } = false;
+
+    /// <summary>
+    /// Maximum number of items to process in iterations (like foreach)
+    /// </summary>
+    public int MaxIterationItems { get; set; } = 1000;
 }

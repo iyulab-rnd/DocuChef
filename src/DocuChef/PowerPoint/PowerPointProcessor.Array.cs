@@ -1,4 +1,5 @@
 ﻿using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Presentation;
 using System.Text.RegularExpressions;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
@@ -11,7 +12,7 @@ namespace DocuChef.PowerPoint;
 internal partial class PowerPointProcessor
 {
     /// <summary>
-    /// Analyze slide for array indices and automatically handle slide duplication if needed
+    /// Analyze slide for array indices and handle slide duplication if needed
     /// </summary>
     private void AnalyzeSlideForArrayIndices(PresentationPart presentationPart, SlidePart slidePart, int slideIndex)
     {
@@ -65,8 +66,8 @@ internal partial class PowerPointProcessor
 
             Logger.Info($"Array '{arrayName}' has {items.Count} items, needs {slidesNeeded} slides with {itemsPerSlide} items per slide");
 
-            // We need to duplicate this slide
-            DuplicateSlideForArray(presentationPart, slidePart, arrayName, items, itemsPerSlide, slidesNeeded, slideIndex);
+            // Duplicate slides and then process each slide
+            DuplicateAndProcessSlidesForArray(presentationPart, slidePart, arrayName, items, itemsPerSlide, slidesNeeded, slideIndex);
         }
     }
 
@@ -131,134 +132,6 @@ internal partial class PowerPointProcessor
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Duplicate a slide for handling array data across multiple slides
-    /// </summary>
-    private void DuplicateSlideForArray(PresentationPart presentationPart, SlidePart templateSlidePart,
-        string arrayName, List<object> items, int itemsPerSlide, int slidesNeeded, int templateIndex)
-    {
-        // Find template slide in presentation
-        var slideIdList = presentationPart.Presentation.SlideIdList;
-        var slideIds = slideIdList.ChildElements.OfType<P.SlideId>().ToList();
-        int originalIndex = slideIds.FindIndex(id => id.RelationshipId == presentationPart.GetIdOfPart(templateSlidePart));
-
-        if (originalIndex == -1)
-        {
-            Logger.Error("Template slide not found in presentation");
-            return;
-        }
-
-        uint maxSlideId = slideIds.Max(id => id.Id.Value);
-        int insertPosition = originalIndex + 1;
-
-        Logger.Debug($"Starting slide duplication for array '{arrayName}' with {slidesNeeded} slides needed");
-
-        // Process first slide (original) with the first batch of items
-        ProcessSlideWithArrayItems(templateSlidePart, arrayName, items, 0, itemsPerSlide);
-
-        // Create and process additional slides for remaining items
-        for (int slideIndex = 1; slideIndex < slidesNeeded; slideIndex++)
-        {
-            // Calculate start index for this slide's batch
-            int batchStartIndex = slideIndex * itemsPerSlide;
-
-            // Clone the template slide
-            SlidePart newSlidePart = CloneSlidePart(presentationPart, templateSlidePart);
-            string newRelId = presentationPart.GetIdOfPart(newSlidePart);
-
-            // Add new slide to presentation
-            P.SlideId newSlideId = new P.SlideId
-            {
-                Id = maxSlideId + (uint)slideIndex,
-                RelationshipId = newRelId
-            };
-
-            slideIdList.InsertAt(newSlideId, insertPosition++);
-
-            // Process this slide with its batch of items
-            ProcessSlideWithArrayItems(newSlidePart, arrayName, items, batchStartIndex, itemsPerSlide);
-
-            Logger.Debug($"Created and processed slide {slideIndex + 1} for items starting at index {batchStartIndex}");
-        }
-
-        // Save the presentation to apply changes
-        presentationPart.Presentation.Save();
-    }
-
-    /// <summary>
-    /// Process a slide with a specific batch of array items
-    /// </summary>
-    private void ProcessSlideWithArrayItems(SlidePart slidePart, string arrayName, List<object> items, int startIndex, int itemsPerSlide)
-    {
-        Logger.Debug($"Processing slide with {items.Count} items, starting at index {startIndex} with {itemsPerSlide} items per slide");
-
-        // Update context for this slide
-        _context.SlidePart = slidePart;
-
-        // Create a copy of the variables to avoid modifying the original context
-        var batchVariables = new Dictionary<string, object>(_context.Variables);
-
-        // Add batch metadata
-        int batchIndex = startIndex / itemsPerSlide;
-        batchVariables["_batchIndex"] = batchIndex;
-        batchVariables["_batchStartIndex"] = startIndex;
-        batchVariables["_batchEndIndex"] = Math.Min(startIndex + itemsPerSlide - 1, items.Count - 1);
-        batchVariables["_batchSize"] = Math.Min(itemsPerSlide, items.Count - startIndex);
-
-        // Add the array items with their batch-adjusted indices
-        for (int i = 0; i < itemsPerSlide; i++)
-        {
-            int itemIndex = startIndex + i;
-            int localIndex = i;
-
-            // Generate variable key for this item
-            string itemKey = $"{arrayName}[{localIndex}]";
-
-            if (itemIndex < items.Count)
-            {
-                // Item exists in the array
-                var item = items[itemIndex];
-                batchVariables[itemKey] = item;
-
-                // If item is an object, also add direct property access
-                if (item != null && !item.GetType().IsPrimitive)
-                {
-                    var properties = item.GetType().GetProperties();
-                    foreach (var prop in properties)
-                    {
-                        if (prop.CanRead)
-                        {
-                            try
-                            {
-                                object propValue = prop.GetValue(item);
-                                batchVariables[$"{itemKey}.{prop.Name}"] = propValue;
-                            }
-                            catch
-                            {
-                                // Skip properties that throw exceptions
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // Item index out of bounds, set null value
-                batchVariables[itemKey] = null;
-            }
-        }
-
-        // Update the context with the batch-specific variables
-        var originalVariables = _context.Variables;
-        _context.Variables = batchVariables;
-
-        // Process text replacements on this slide
-        ProcessTextReplacements(slidePart);
-
-        // Restore original variables
-        _context.Variables = originalVariables;
     }
 
     /// <summary>

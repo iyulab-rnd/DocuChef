@@ -1,4 +1,32 @@
-﻿using DocuChef;
+﻿/*
+template_2.pptx 설명
+# 첫번째 슬라이드:
+- 상단 중앙 도형1: ${ppt.Image("LogoPath")}
+- 제목 1: ${Title}
+- 부제목 2: hello ${Subtitle} world
+- TextBox 3: Created By: ${Date:yyyy-MM-dd}
+# 두번째 슬라이드:
+- 슬라이드노트: #foreach: Items as item
+- 좌상단 직사각형1: ${ppt.Image("LogoPath")}
+- 우상단 직사각형5: ${CompanyName}
+- 목록 직사각형1:
+${item[0].Id}. ${item[0].Name} - ${item[0].Description}
+가격: ${item[0].Price:C0}원
+- 목록 직사각형2:
+${item[1].Id}. ${item[1].Name} - ${item[1].Description}
+가격: ${item[1].Price:C0}원
+- 목록 직사각형3:
+${item[2].Id}. ${item[2].Name} - ${item[2].Description}
+가격: ${item[2].Price:C0}원
+- 목록 직사각형4:
+${item[3].Id}. ${item[3].Name} - ${item[3].Description}
+가격: ${item[3].Price:C0}원
+- 목록 직사각형5:
+${item[4].Id}. ${item[4].Name} - ${item[4].Description}
+가격: ${item[4].Price:C0}원
+ */
+
+using DocuChef;
 using DocuChef.PowerPoint;
 using System.Diagnostics;
 
@@ -7,7 +35,7 @@ Console.WriteLine("=======================================================");
 
 // 파일 경로 설정
 string basePath = AppDomain.CurrentDomain.BaseDirectory;
-string templatePath = Path.Combine(basePath, "files", "ppt", "template_1.pptx");
+string templatePath = Path.Combine(basePath, "files", "ppt", "template_2.pptx");
 string logoPath = Path.Combine(basePath, "files", "logo.png");
 string outputPath = Path.Combine(basePath, "output_multi_slides.pptx");
 
@@ -55,7 +83,7 @@ try
 
     // Items 배열 생성
     var items = new List<Item>();
-    for (int i = 1; i <= 25; i++)
+    for (int i = 1; i <= 3; i++)
     {
         items.Add(new Item
         {

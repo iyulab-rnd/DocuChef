@@ -129,10 +129,45 @@ public static class OpenXmlExtensions
     public static string GetNotes(this SlidePart slidePart)
     {
         if (slidePart?.NotesSlidePart?.NotesSlide == null)
+        {
+            Logger.Debug("NotesSlidePart or NotesSlide is null");
             return string.Empty;
+        }
 
-        var textElements = slidePart.NotesSlidePart.NotesSlide.Descendants<A.Text>();
-        return string.Join(" ", textElements.Select(t => t.Text ?? string.Empty));
+        Logger.Debug("Found NotesSlide");
+
+        // 모든 Shape 요소 찾기
+        var shapes = slidePart.NotesSlidePart.NotesSlide.Descendants<P.Shape>().ToList();
+        Logger.Debug($"Found {shapes.Count} shapes in notes slide");
+
+        // 모든 텍스트 요소 로깅
+        foreach (var shape in shapes)
+        {
+            var texts = shape.Descendants<A.Text>().Select(t => t.Text).Where(t => !string.IsNullOrEmpty(t)).ToList();
+            Logger.Debug($"Shape ID: {shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value}, Texts: {string.Join(", ", texts)}");
+        }
+
+        // 모든 텍스트 수집
+        var allTexts = slidePart.NotesSlidePart.NotesSlide
+            .Descendants<A.Text>()
+            .Select(t => t.Text)
+            .Where(t => !string.IsNullOrEmpty(t))
+            .ToList();
+
+        Logger.Debug($"All texts in notes slide: {string.Join(", ", allTexts)}");
+
+        // 직접적인 방법: 지시문 형식의 텍스트 찾기
+        var directiveText = allTexts.FirstOrDefault(t => t.StartsWith("#"));
+        if (!string.IsNullOrEmpty(directiveText))
+        {
+            Logger.Debug($"Found directive text: {directiveText}");
+            return directiveText;
+        }
+
+        // 그 외의 경우 모든 텍스트 결합 (단, 숫자만 있는 텍스트는 제외)
+        var result = string.Join(" ", allTexts.Where(t => !System.Text.RegularExpressions.Regex.IsMatch(t, @"^\d+$")));
+        Logger.Debug($"Returning combined text: {result}");
+        return result;
     }
 
     /// <summary>

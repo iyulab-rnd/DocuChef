@@ -165,29 +165,6 @@ internal static class DirectiveParser
                 Logger.Debug($"Auto-determined item name: {itemName} from collection: {directive.Value}");
             }
         }
-
-        // Handle slide-foreach directive
-        else if (directive.Name == "slide-foreach")
-        {
-            // Check for "as" keyword in the value (collection as item)
-            var match = Regex.Match(directive.Value, @"(.+?)\s+as\s+(.+)");
-            if (match.Success)
-            {
-                string collectionName = match.Groups[1].Value.Trim();
-                string itemName = match.Groups[2].Value.Trim();
-
-                directive.Value = collectionName;
-                directive.Parameters["itemName"] = itemName;
-                Logger.Debug($"Parsed 'as' clause in slide-foreach: collection={collectionName}, item={itemName}");
-            }
-            else
-            {
-                // Auto-determine item name from collection name as per PPT syntax guidelines
-                string itemName = DetermineItemNameFromCollection(directive.Value);
-                directive.Parameters["itemName"] = itemName;
-                Logger.Debug($"Auto-determined item name: {itemName} from collection: {directive.Value}");
-            }
-        }
     }
 
     /// <summary>

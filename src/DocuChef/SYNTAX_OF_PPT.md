@@ -27,11 +27,9 @@ ${ppt.Table("테이블데이터")} // 표 데이터 바인딩
 
 ### 3. 제어 지시문 (슬라이드 노트에만 배치)
 ```
-#foreach: 컬렉션명 as 항목명, 옵션...            // 반복 처리 (항목명 명시적 지정)
-#foreach: 컬렉션명, 옵션...                     // 반복 처리 (항목명 자동 결정)
-#if: 조건식, 옵션...                           // 조건부 처리
-#slide-foreach: 컬렉션명 as 항목명, 옵션...     // 슬라이드 복제 (항목명 명시적 지정)
-#slide-foreach: 컬렉션명, 옵션...              // 슬라이드 복제 (항목명 자동 결정)
+#foreach: 컬렉션명 as 항목명, 옵션...    // 슬라이드 복제 (항목명 명시적 지정)
+#foreach: 컬렉션명, 옵션...             // 슬라이드 복제 (항목명 자동 결정)
+#if: 조건식, 옵션...                   // 조건부 처리
 ```
 
 ## 상세 문법 설명
@@ -72,16 +70,20 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
 
 ### 3. 제어 지시문 (슬라이드 노트에만 배치)
 
-#### 반복 지시문
+#### 슬라이드 복제 지시문 (#foreach)
 ```
-#foreach: products, target: "product_box", maxItems: 6
-#foreach: testimonials as testimonial, target: "quote_text"
+#foreach: categories
+#foreach: products as product
 ```
 
-- `target`: 반복적으로 복제할 도형/텍스트 상자의 이름
-- `maxItems`: 한 슬라이드에 표시할 최대 항목 수
-- `layout`: 레이아웃 유형 (grid, vertical, horizontal, etc.)
-- `continueOnNewSlide`: 최대 항목 초과 시 새 슬라이드에 계속 (true/false)
+- 슬라이드의 디자인을 유지하면서 데이터 컬렉션의 각 항목에 대해 슬라이드를 복제합니다.
+- 슬라이드 내부에 인덱스 참조(예: `${item[0]}`, `${item[1]}` 등)가 있는 경우, 각 슬라이드는 해당 인덱스 범위의 데이터로 채워집니다.
+- 데이터 컬렉션의 크기에 따라 필요한 만큼 슬라이드가 생성됩니다.
+
+예: 슬라이드에 `${item[0]}` ~ `${item[4]}`까지 참조가 있고 데이터가 12개인 경우:
+- 첫 번째 슬라이드: `item[0]`~`item[4]`는 데이터의 0~4번 항목으로 채워짐
+- 두 번째 슬라이드: `item[0]`~`item[4]`는 데이터의 5~9번 항목으로 채워짐 
+- 세 번째 슬라이드: `item[0]`~`item[1]`은 데이터의 10~11번 항목으로 채워지고, `item[2]`~`item[4]`는 빈 값으로 처리됨
 
 #### 조건부 지시문
 ```
@@ -90,17 +92,6 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
 ```
 - `target`: 조건부로 표시/숨김 처리할 도형의 이름
 - `visibleWhenFalse`: 조건이 거짓일 때 표시할 대체 도형의 이름
-
-#### 슬라이드 복제 지시문
-```
-#slide-foreach: categories
-#slide-foreach: products as product, titleTarget: "product_title", imageTarget: "product_image"
-#slide-foreach: departments as dept, maxItems: 10
-```
-- `titleTarget`: 제목을 표시할 텍스트 상자의 이름
-- `imageTarget`: 이미지를 표시할 이미지 도형의 이름
-- `maxItems`: 슬라이드당 표시할 최대 항목 수 (이 수를 초과하면 새 슬라이드 생성)
-- `maxSlides`: 생성할 최대 슬라이드 수
 
 ## 변수명 자동결정 규칙
 
@@ -116,28 +107,17 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
    - `Data` → `data`
 
 3. **명시적 지정**: `as` 키워드를 사용하여 변수명을 명시적으로 지정할 수 있습니다.
-   - `#slide-foreach: Products as p`에서 `${p.name}`으로 접근
+   - `#foreach: Products as p`에서 `${p.name}`으로 접근
 
 ## 여러 컬렉션 동시 처리
 
 여러 컬렉션을 동시에 처리하는 방법:
 
 ```
-#slide-foreach: Products as product, Categories as category, maxItems: 5
+#foreach: Products as product, Categories as category
 ```
 
 이 경우, 각 슬라이드에서 `${product.name}`과 `${category.name}`으로 현재 항목에 접근할 수 있습니다.
-
-## 중첩 컬렉션 처리
-
-중첩된 컬렉션을 처리하는 방법:
-
-```
-#slide-foreach: Departments, maxItems: 1
-  #foreach: department.Employees as emp, target: "EmployeeTemplate", maxItems: 10
-```
-
-이 경우, 각 부서당 하나의 슬라이드가 생성되고, 각 슬라이드 내에서 해당 부서의 직원 목록이 처리됩니다.
 
 ## 문법 적용 위치
 
@@ -157,7 +137,7 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
 
 ```
 # 이 슬라이드는 제품 목록을 표시합니다
-#foreach: products, target: "product_item", maxItems: 4, layout: "grid", continueOnNewSlide: true
+#foreach: products as item
 #if: products.Count > 0, target: "products_container", visibleWhenFalse: "no_products_message"
 ```
 
@@ -176,25 +156,26 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
 #if: report.isConfidential, target: "confidential_watermark"
 ```
 
-### 제품 목록 슬라이드
+### 제품 목록 슬라이드 (배열 인덱스 사용)
 
 **슬라이드 요소 내용:**
 - 제목 텍스트 상자: `${category.name} 제품 목록`
-- 제품 템플릿 텍스트 상자 (이름: "product_item"): 
+- 제품 항목 1: 
   ```
-  ${item.name}
-  가격: ${item.price:C2}
-  ${item.isNew ? "[신제품]" : ""}
+  ${item[0].Id}. ${item[0].Name} - ${item[0].Description}
+  가격: ${item[0].Price:C0}원
   ```
-- 제품 이미지 도형 (이름: "product_image"): 
+- 제품 항목 2: 
   ```
-  ${ppt.Image("item.imageUrl")}
+  ${item[1].Id}. ${item[1].Name} - ${item[1].Description}
+  가격: ${item[1].Price:C0}원
   ```
+- 제품 항목 3-5: (유사한 형식으로 계속)
 
 **슬라이드 노트:**
 ```
-#slide-foreach: categories as category, maxItems: 1
-  #foreach: category.products as item, target: "product_item", maxItems: 6, layout: "grid(3,2)"
+#foreach: categories as category
+  #if: category.products.Length > 0, target: "products_container"
 ```
 
 ### 데이터 대시보드 슬라이드
@@ -212,24 +193,26 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
 
 **슬라이드 노트:**
 ```
-#if: salesData.length > 0, target: "sales_chart", visibleWhenFalse: "no_data_message"
+#if: salesData.Length > 0, target: "sales_chart", visibleWhenFalse: "no_data_message"
 ```
 
 ### 부서별 보고서 슬라이드 (여러 슬라이드 생성)
 
 **슬라이드 요소 내용:**
-- 제목 텍스트 상자 (이름: "dept_title"): `${dept.name} 부서`
+- 제목 텍스트 상자: `${dept.name} 부서`
 - 부서장 텍스트 상자: `부서장: ${dept.manager}`
-- 인원수 텍스트 상자: `인원: ${dept.members.length}명`
+- 인원수 텍스트 상자: `인원: ${dept.members.Length}명`
 - 실적 차트 (이름: "dept_chart"): 
   ```
   ${ppt.Chart("dept.performance", title: "${dept.name} 부서 실적")}
   ```
+- 팀원 1: `${member[0].name} (${member[0].position})`
+- 팀원 2: `${member[1].name} (${member[1].position})`
+- 팀원 3-8: (유사한 형식으로 계속)
 
 **슬라이드 노트:**
 ```
-#slide-foreach: departments as dept, maxItems: 1
-  #foreach: dept.members as member, target: "member_template", maxItems: 8
+#foreach: departments as dept
 ```
 
 ### 여러 컬렉션 동시 표시 (관련 데이터)
@@ -241,7 +224,7 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
 
 **슬라이드 노트:**
 ```
-#slide-foreach: Products as product, Categories as category, maxItems: 1
+#foreach: Products as product, Categories as category
 ```
 
 이 예제에서는 Products와 Categories 배열을 동시에 처리하며, 인덱스가 같은 항목끼리 매칭됩니다.

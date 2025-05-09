@@ -49,4 +49,9 @@ public class PowerPointOptions
     /// Maximum number of iterations for foreach directive
     /// </summary>
     public int MaxIterationItems { get; set; } = 1000;
+
+    /// <summary>
+    /// Whether to preserve text formatting when processing expressions
+    /// </summary>
+    public bool PreserveTextFormatting { get; set; } = true;
 }

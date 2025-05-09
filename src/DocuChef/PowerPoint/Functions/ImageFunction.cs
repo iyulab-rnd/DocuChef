@@ -1,4 +1,5 @@
 ﻿using DocuChef.Extensions;
+using DocuChef.PowerPoint.Helpers;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using A = DocumentFormat.OpenXml.Drawing;

@@ -25,6 +25,9 @@ public class PowerPointRecipe : RecipeBase
         _templatePath = templatePath;
         _options = options ?? new PowerPointOptions();
 
+        // Ensure text formatting is preserved by default
+        _options.PreserveTextFormatting = true;
+
         Logger.Debug($"PowerPoint recipe initialized from file: {templatePath}");
 
         if (_options.RegisterBuiltInFunctions)

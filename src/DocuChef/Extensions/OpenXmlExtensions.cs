@@ -1,6 +1,9 @@
-﻿using DocumentFormat.OpenXml;
+﻿using DocuChef.PowerPoint;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
+using System.Text;
+using System.Text.RegularExpressions;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
 
@@ -55,8 +58,282 @@ public static class OpenXmlExtensions
         if (shape == null)
             return string.Empty;
 
-        var textElements = shape.Descendants<A.Text>();
-        return string.Join(" ", textElements.Select(t => t.Text ?? string.Empty));
+        var paragraphs = shape.Descendants<A.Paragraph>();
+        if (!paragraphs.Any())
+            return string.Empty;
+
+        var sb = new StringBuilder();
+
+        foreach (var paragraph in paragraphs)
+        {
+            if (sb.Length > 0)
+                sb.AppendLine();
+
+            foreach (var run in paragraph.Elements<A.Run>())
+            {
+                var text = run.GetFirstChild<A.Text>();
+                if (text != null)
+                {
+                    sb.Append(text.Text);
+                }
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Gets the text content of a PowerPoint shape with formatting information
+    /// </summary>
+    public static List<(string Text, A.RunProperties Properties)> GetFormattedText(this P.Shape shape)
+    {
+        var result = new List<(string Text, A.RunProperties Properties)>();
+
+        if (shape?.TextBody == null)
+            return result;
+
+        foreach (var paragraph in shape.TextBody.Elements<A.Paragraph>())
+        {
+            foreach (var run in paragraph.Elements<A.Run>())
+            {
+                var text = run.GetFirstChild<A.Text>();
+                if (text != null && !string.IsNullOrEmpty(text.Text))
+                {
+                    var props = run.RunProperties?.CloneNode(true) as A.RunProperties;
+                    result.Add((text.Text, props));
+                }
+            }
+
+            // Add paragraph break marker if not the last paragraph
+            if (paragraph != shape.TextBody.Elements<A.Paragraph>().Last())
+            {
+                result.Add(("\n", null));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Clears text content from a PowerPoint shape
+    /// </summary>
+    public static void ClearText(this P.Shape shape)
+    {
+        if (shape?.TextBody == null)
+            return;
+
+        // Keep only one paragraph with one empty run
+        var textBody = shape.TextBody;
+
+        // Remove all paragraphs
+        var paragraphs = textBody.Elements<A.Paragraph>().ToList();
+        foreach (var para in paragraphs)
+        {
+            para.Remove();
+        }
+
+        // Add a single empty paragraph
+        var emptyParagraph = new A.Paragraph();
+        var emptyRun = new A.Run();
+        emptyRun.AppendChild(new A.Text());
+        emptyParagraph.AppendChild(emptyRun);
+        textBody.AppendChild(emptyParagraph);
+    }
+
+    /// <summary>
+    /// Sets text content in a PowerPoint shape, preserving formatting by processing each run individually
+    /// </summary>
+    public static bool SetTextWithExpressions(this P.Shape shape, IExpressionEvaluator processor, Dictionary<string, object> variables)
+    {
+        if (shape?.TextBody == null || processor == null)
+            return false;
+
+        bool hasChanges = false;
+
+        // Process each paragraph
+        foreach (var paragraph in shape.TextBody.Elements<A.Paragraph>().ToList())
+        {
+            // Process each run
+            foreach (var run in paragraph.Elements<A.Run>().ToList())
+            {
+                var textElement = run.GetFirstChild<A.Text>();
+                if (textElement == null || string.IsNullOrEmpty(textElement.Text))
+                    continue;
+
+                string originalText = textElement.Text;
+
+                // Check if there are expressions to process
+                if (!originalText.Contains("${"))
+                    continue;
+
+                // Process expressions
+                string processedText = ProcessExpressions(originalText, processor, variables);
+
+                // Skip if no changes
+                if (processedText == originalText)
+                    continue;
+
+                // Update text
+                textElement.Text = processedText;
+                hasChanges = true;
+            }
+        }
+
+        return hasChanges;
+    }
+
+    /// <summary>
+    /// Process expressions in text
+    /// </summary>
+    private static string ProcessExpressions(string text, IExpressionEvaluator processor, Dictionary<string, object> variables)
+    {
+        if (string.IsNullOrEmpty(text) || processor == null)
+            return text;
+
+        try
+        {
+            // Process ${...} expressions using regex
+            var regex = new Regex(@"\${([^{}]+)}");
+            return regex.Replace(text, match => {
+                try
+                {
+                    // Evaluate the expression
+                    var expressionValue = processor.EvaluateCompleteExpression(match.Value, variables);
+                    return expressionValue?.ToString() ?? "";
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning($"Error evaluating expression '{match.Value}': {ex.Message}");
+                    return match.Value; // Keep original on error
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Error processing expressions: {ex.Message}", ex);
+            return text;
+        }
+    }
+
+    /// <summary>
+    /// Sets text content in a PowerPoint shape, preserving formatting
+    /// </summary>
+    public static void SetText(this P.Shape shape, string text)
+    {
+        if (shape?.TextBody == null)
+            return;
+
+        try
+        {
+            Logger.Debug($"Setting text in shape: {text}");
+
+            // Clear existing text but preserve paragraph properties
+            var textBody = shape.TextBody;
+            var existingParagraphs = textBody.Elements<A.Paragraph>().ToList();
+
+            // Backup paragraph properties and formatting
+            var paragraphProperties = existingParagraphs
+                .Select(p => p.ParagraphProperties?.CloneNode(true) as A.ParagraphProperties)
+                .ToList();
+
+            // Backup first run properties for formatting preservation
+            A.RunProperties runProps = null;
+            foreach (var para in existingParagraphs)
+            {
+                var firstRun = para.Elements<A.Run>().FirstOrDefault();
+                if (firstRun?.RunProperties != null)
+                {
+                    runProps = firstRun.RunProperties.CloneNode(true) as A.RunProperties;
+                    break;
+                }
+            }
+
+            // Remove all existing paragraphs
+            foreach (var para in existingParagraphs)
+            {
+                para.Remove();
+            }
+
+            // Split text into lines
+            string[] lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
+            if (lines.Length == 0)
+            {
+                lines = new[] { string.Empty };
+            }
+
+            // Create new paragraphs
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var para = new A.Paragraph();
+
+                // Apply preserved paragraph properties if available
+                if (i < paragraphProperties.Count && paragraphProperties[i] != null)
+                {
+                    para.AppendChild(paragraphProperties[i]);
+                }
+
+                var run = new A.Run();
+
+                // Apply preserved run properties if available
+                if (runProps != null)
+                {
+                    run.RunProperties = runProps.CloneNode(true) as A.RunProperties;
+                }
+
+                run.AppendChild(new A.Text(lines[i]));
+                para.AppendChild(run);
+                textBody.AppendChild(para);
+            }
+
+            Logger.Debug($"Text set successfully in shape");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Error setting text in shape: {ex.Message}", ex);
+
+            // Fallback method for setting text
+            try
+            {
+                var textBody = shape.TextBody;
+
+                // Clear all existing text elements
+                var textElements = textBody.Descendants<A.Text>().ToList();
+                foreach (var textElement1 in textElements)
+                {
+                    textElement1.Text = "";
+                }
+
+                // Get or create a paragraph and run
+                var paragraph = textBody.Elements<A.Paragraph>().FirstOrDefault();
+                if (paragraph == null)
+                {
+                    paragraph = new A.Paragraph();
+                    textBody.AppendChild(paragraph);
+                }
+
+                var run = paragraph.Elements<A.Run>().FirstOrDefault();
+                if (run == null)
+                {
+                    run = new A.Run();
+                    paragraph.AppendChild(run);
+                }
+
+                var textElement2 = run.Elements<A.Text>().FirstOrDefault();
+                if (textElement2 == null)
+                {
+                    textElement2 = new A.Text();
+                    run.AppendChild(textElement2);
+                }
+
+                // Set the text
+                textElement2.Text = text;
+                Logger.Debug($"Text set with fallback method in shape");
+            }
+            catch (Exception fallbackEx)
+            {
+                Logger.Error($"Fallback method also failed: {fallbackEx.Message}", fallbackEx);
+            }
+        }
     }
 
     /// <summary>
@@ -168,42 +445,6 @@ public static class OpenXmlExtensions
         var result = string.Join(" ", allTexts.Where(t => !System.Text.RegularExpressions.Regex.IsMatch(t, @"^\d+$")));
         Logger.Debug($"Returning combined text: {result}");
         return result;
-    }
-
-    /// <summary>
-    /// Clears text content from a PowerPoint shape
-    /// </summary>
-    public static void ClearText(this P.Shape shape)
-    {
-        if (shape?.TextBody == null)
-            return;
-
-        // Keep only one paragraph with one empty run
-        var textBody = shape.TextBody;
-
-        // Remove all paragraphs
-        var paragraphs = textBody.Elements<A.Paragraph>().ToList();
-        foreach (var para in paragraphs)
-        {
-            para.Remove();
-        }
-
-        // Add a single empty paragraph
-        var emptyParagraph = new A.Paragraph();
-        var emptyRun = new A.Run();
-        emptyRun.AppendChild(new A.Text());
-        emptyParagraph.AppendChild(emptyRun);
-        textBody.AppendChild(emptyParagraph);
-
-        // Set text as not editable
-        var bodyProps = textBody.GetFirstChild<A.BodyProperties>();
-        if (bodyProps == null)
-        {
-            bodyProps = new A.BodyProperties();
-            textBody.InsertAt(bodyProps, 0);
-        }
-
-        bodyProps.SetAttribute(new OpenXmlAttribute("noTextEdit", null, "1"));
     }
 
     /// <summary>

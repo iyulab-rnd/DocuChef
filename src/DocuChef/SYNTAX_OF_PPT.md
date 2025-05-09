@@ -2,8 +2,8 @@
 
 ## 기본 원칙
 
-1. **DollarSignEngine 친화적**: 기존 DollarSignEngine 사용 경험과 최대한 유사하게 유지
-2. **역할 분리**: 슬라이드 노트는 제어 지시문용, 텍스트 요소는 값 바인딩용
+1. **디자인 중심**: PowerPoint는 디자인이 중요하므로 미리 디자인된 요소에 데이터를 바인딩하는 방식 사용
+2. **DollarSignEngine 친화적**: 기존 DollarSignEngine 사용 경험과 최대한 유사하게 유지
 3. **간결함**: 직관적이고 간소화된 문법으로 사용 편의성 극대화
 4. **디자인 보존**: PPT 디자인 요소의 원래 의도 존중
 
@@ -11,26 +11,58 @@
 
 ### 1. 값 바인딩 (슬라이드 요소 내)
 ```
-${속성명}                   // 기본 속성 바인딩
-${객체.속성명}              // 중첩 속성 바인딩
-${값:포맷지정자}            // 포맷 지정자 사용
-${조건 ? 값1 : 값2}         // 조건부 표현식
-${메소드()}                 // 메소드 호출
+${PropertyName}                // 기본 속성 바인딩
+${Object.PropertyName}         // 중첩 속성 바인딩
+${Value:FormatSpecifier}       // 포맷 지정자 사용
+${Condition ? Value1 : Value2} // 조건부 표현식
+${Method()}                    // 메소드 호출
+${Array[Index].PropertyName}   // 배열 요소의 속성 바인딩
 ```
 
 ### 2. 특수 함수 (슬라이드 요소 내)
 ```
-${ppt.Image("이미지속성")}   // 이미지 바인딩
-${ppt.Chart("차트데이터")}   // 차트 데이터 바인딩
-${ppt.Table("테이블데이터")} // 표 데이터 바인딩
+${ppt.Image("ImageProperty")}   // 이미지 바인딩
+${ppt.Chart("ChartData")}       // 차트 데이터 바인딩
+${ppt.Table("TableData")}       // 표 데이터 바인딩
 ```
 
 ### 3. 제어 지시문 (슬라이드 노트에만 배치)
 ```
-#foreach: 컬렉션명 as 항목명, 옵션...    // 슬라이드 복제 (항목명 명시적 지정)
-#foreach: 컬렉션명, 옵션...             // 슬라이드 복제 (항목명 자동 결정)
-#if: 조건식, 옵션...                   // 조건부 처리
+#if: Condition, target: "ShapeName", visibleWhenFalse: "AlternateShapeName"  // 조건부 요소 표시/숨김
 ```
+
+## 배열 데이터 처리
+
+PowerPoint는 디자인 중심이므로, 배열 처리도 미리 디자인된 요소에 데이터를 바인딩하는 방식으로 처리합니다:
+
+### 자동 배열 인덱싱
+
+1. **배열 요소 직접 참조**: 슬라이드 요소에서 배열 인덱스를 직접 사용
+   ```
+   제품 1: ${Products[0].Name} - ${Products[0].Price}
+   제품 2: ${Products[1].Name} - ${Products[1].Price}
+   제품 3: ${Products[2].Name} - ${Products[2].Price}
+   ```
+
+2. **자동 슬라이드 생성**: 엔진이 자동으로 배열 크기에 따라 슬라이드 복제
+   - 예: `Products` 배열이 8개 항목을 가지고 있다면:
+     - 첫번째 슬라이드: 0,1,2번 항목
+     - 두번째 슬라이드: 3,4,5번 항목
+     - 세번째 슬라이드: 6,7번 항목
+
+3. **인덱스 오프셋 자동 계산**: 추가된 슬라이드에서 인덱스 자동 조정
+   - 첫번째 슬라이드: `Products[0]`, `Products[1]`, `Products[2]`
+   - 두번째 슬라이드: 동일한 참조가 `Products[3]`, `Products[4]`, `Products[5]`로 자동 변환
+   - 세번째 슬라이드: 동일한 참조가 `Products[6]`, `Products[7]`, 빈 값으로 자동 변환
+
+### 작동 방식
+
+1. **배열 인덱스 패턴 감지**: 엔진이 자동으로 슬라이드 내 `${Array[Index].Property}` 패턴을 분석
+2. **슬라이드당 항목 수 계산**: 한 슬라이드에서 가장 높은 인덱스 + 1로 결정
+   - 예: 한 슬라이드에 `[0]`, `[1]`, `[2]`가 있다면 슬라이드당 3개 항목
+3. **필요한 슬라이드 수 계산**: `총 항목 수 ÷ 슬라이드당 항목 수`로 계산
+4. **자동 슬라이드 복제**: 필요한 만큼 원본 슬라이드 복제
+5. **인덱스 자동 조정**: 각 복제된 슬라이드에서 인덱스 참조를 자동으로 조정
 
 ## 상세 문법 설명
 
@@ -39,10 +71,18 @@ ${ppt.Table("테이블데이터")} // 표 데이터 바인딩
 모든 텍스트 요소에서 DollarSignEngine의 문법을 그대로 사용:
 
 ```
-제목: ${report.title}
+제목: ${Report.Title}
 날짜: ${DateTime.Now:yyyy-MM-dd}
-합계: ${items.Sum(i => i.price):C2}
-상태: ${status == "active" ? "활성" : "비활성"}
+합계: ${Items.Sum(i => i.Price):C2}
+상태: ${Status == "active" ? "활성" : "비활성"}
+```
+
+배열 요소 참조:
+
+```
+제품: ${Products[0].Name}
+가격: ${Products[0].Price:C0}원
+설명: ${Products[0].Description}
 ```
 
 ### 2. 특수 함수 (슬라이드 요소 내)
@@ -50,74 +90,38 @@ ${ppt.Table("테이블데이터")} // 표 데이터 바인딩
 #### 이미지 바인딩
 이미지 도형의 텍스트에:
 ```
-${ppt.Image("company.logo")}
-${ppt.Image("product.photo", width: 300, height: 200, preserveAspectRatio: true)}
+${ppt.Image("Company.Logo")}
+${ppt.Image("Product.Photo", width: 300, height: 200, preserveAspectRatio: true)}
+```
+
+배열 요소의 이미지:
+```
+${ppt.Image("Products[0].Image")}
 ```
 
 #### 차트 데이터 바인딩
 차트 도형의 텍스트에:
 ```
-${ppt.Chart("salesData")}
-${ppt.Chart("salesData", series: "series", categories: "categories", title: "월별 판매량")}
+${ppt.Chart("SalesData")}
+${ppt.Chart("SalesData", series: "Series", categories: "Categories", title: "월별 판매량")}
 ```
 
 #### 표 데이터 바인딩
 표 도형의 텍스트에:
 ```
-${ppt.Table("employeeData")}
-${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
+${ppt.Table("EmployeeData")}
+${ppt.Table("EmployeeData", headers: true, startRow: 1, endRow: 10)}
 ```
 
 ### 3. 제어 지시문 (슬라이드 노트에만 배치)
 
-#### 슬라이드 복제 지시문 (#foreach)
-```
-#foreach: categories
-#foreach: products as product
-```
-
-- 슬라이드의 디자인을 유지하면서 데이터 컬렉션의 각 항목에 대해 슬라이드를 복제합니다.
-- 슬라이드 내부에 인덱스 참조(예: `${item[0]}`, `${item[1]}` 등)가 있는 경우, 각 슬라이드는 해당 인덱스 범위의 데이터로 채워집니다.
-- 데이터 컬렉션의 크기에 따라 필요한 만큼 슬라이드가 생성됩니다.
-
-예: 슬라이드에 `${item[0]}` ~ `${item[4]}`까지 참조가 있고 데이터가 12개인 경우:
-- 첫 번째 슬라이드: `item[0]`~`item[4]`는 데이터의 0~4번 항목으로 채워짐
-- 두 번째 슬라이드: `item[0]`~`item[4]`는 데이터의 5~9번 항목으로 채워짐 
-- 세 번째 슬라이드: `item[0]`~`item[1]`은 데이터의 10~11번 항목으로 채워지고, `item[2]`~`item[4]`는 빈 값으로 처리됨
-
 #### 조건부 지시문
 ```
-#if: report.hasChart, target: "sales_chart"
-#if: total > 1000, target: "warning_box", visibleWhenFalse: "success_box"
+#if: Report.HasChart, target: "SalesChart"
+#if: Total > 1000, target: "WarningBox", visibleWhenFalse: "SuccessBox"
 ```
 - `target`: 조건부로 표시/숨김 처리할 도형의 이름
 - `visibleWhenFalse`: 조건이 거짓일 때 표시할 대체 도형의 이름
-
-## 변수명 자동결정 규칙
-
-컬렉션 변수명에서 항목 변수명을 자동으로 결정하는 규칙:
-
-1. **기본 규칙**: 컬렉션 이름에서 마지막 's'를 제거한 형태가 항목 변수명이 됩니다.
-   - `Items` → `item`
-   - `Products` → `product`
-   - `Categories` → `category`
-
-2. **예외 처리**: 's'로 끝나지 않는 컬렉션 이름이나 불규칙한 복수형의 경우, 컬렉션 이름을 소문자화하여 사용합니다.
-   - `People` → `people`
-   - `Data` → `data`
-
-3. **명시적 지정**: `as` 키워드를 사용하여 변수명을 명시적으로 지정할 수 있습니다.
-   - `#foreach: Products as p`에서 `${p.name}`으로 접근
-
-## 여러 컬렉션 동시 처리
-
-여러 컬렉션을 동시에 처리하는 방법:
-
-```
-#foreach: Products as product, Categories as category
-```
-
-이 경우, 각 슬라이드에서 `${product.name}`과 `${category.name}`으로 현재 항목에 접근할 수 있습니다.
 
 ## 문법 적용 위치
 
@@ -136,9 +140,8 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
 ## 슬라이드 노트 작성 예시
 
 ```
-# 이 슬라이드는 제품 목록을 표시합니다
-#foreach: products as item
-#if: products.Count > 0, target: "products_container", visibleWhenFalse: "no_products_message"
+# 이 슬라이드는 제품 상세 정보를 표시합니다
+#if: Products.Count > 0, target: "ProductsContainer", visibleWhenFalse: "NoProductsMessage"
 ```
 
 ## 예제 시나리오
@@ -146,85 +149,149 @@ ${ppt.Table("employeeData", headers: true, startRow: 1, endRow: 10)}
 ### 기본 프레젠테이션 슬라이드
 
 **슬라이드 요소 내용:**
-- 제목 텍스트 상자: `${report.title}`
-- 부제목 텍스트 상자: `${report.subtitle}`
-- 날짜 텍스트 상자: `${report.date:yyyy-MM-dd}`
-- 로고 이미지: `${ppt.Image("company.logo")}`
+- 제목 텍스트 상자: `${Report.Title}`
+- 부제목 텍스트 상자: `${Report.Subtitle}`
+- 날짜 텍스트 상자: `${Report.Date:yyyy-MM-dd}`
+- 로고 이미지: `${ppt.Image("Company.Logo")}`
 
 **슬라이드 노트:**
 ```
-#if: report.isConfidential, target: "confidential_watermark"
+#if: Report.IsConfidential, target: "ConfidentialWatermark"
 ```
 
 ### 제품 목록 슬라이드 (배열 인덱스 사용)
 
 **슬라이드 요소 내용:**
-- 제목 텍스트 상자: `${category.name} 제품 목록`
+- 제목 텍스트 상자: `${Category.Name} 제품 목록`
 - 제품 항목 1: 
   ```
-  ${item[0].Id}. ${item[0].Name} - ${item[0].Description}
-  가격: ${item[0].Price:C0}원
+  ${Products[0].Id}. ${Products[0].Name}
+  가격: ${Products[0].Price:C0}원
   ```
 - 제품 항목 2: 
   ```
-  ${item[1].Id}. ${item[1].Name} - ${item[1].Description}
-  가격: ${item[1].Price:C0}원
+  ${Products[1].Id}. ${Products[1].Name}
+  가격: ${Products[1].Price:C0}원
   ```
-- 제품 항목 3-5: (유사한 형식으로 계속)
+- 제품 항목 3: 
+  ```
+  ${Products[2].Id}. ${Products[2].Name}
+  가격: ${Products[2].Price:C0}원
+  ```
 
 **슬라이드 노트:**
 ```
-#foreach: categories as category
-  #if: category.products.Length > 0, target: "products_container"
+#if: Products.Count > 0, target: "ProductsContainer"
 ```
+
+**결과:**
+- `Products` 배열이 8개 항목을 가지고 있다면:
+  - 첫번째 슬라이드: 0,1,2번 항목
+  - 두번째 슬라이드: 3,4,5번 항목
+  - 세번째 슬라이드: 6,7번 항목
 
 ### 데이터 대시보드 슬라이드
 
 **슬라이드 요소 내용:**
-- 제목 텍스트 상자: `${period} 판매 분석`
-- 차트 도형 (이름: "sales_chart"): 
+- 제목 텍스트 상자: `${Period} 판매 분석`
+- 차트 도형 (이름: "SalesChart"): 
   ```
-  ${ppt.Chart("salesData", title: "${period} 판매 추이")}
+  ${ppt.Chart("SalesData", title: "${Period} 판매 추이")}
   ```
-- 표 도형 (이름: "top_products"): 
+- 표 도형 (이름: "TopProducts"): 
   ```
-  ${ppt.Table("topProducts", headers: true)}
+  ${ppt.Table("TopProducts", headers: true)}
   ```
 
 **슬라이드 노트:**
 ```
-#if: salesData.Length > 0, target: "sales_chart", visibleWhenFalse: "no_data_message"
+#if: SalesData.Length > 0, target: "SalesChart", visibleWhenFalse: "NoDataMessage"
 ```
 
-### 부서별 보고서 슬라이드 (여러 슬라이드 생성)
+### 부서별 팀원 슬라이드 (배열 인덱스 사용)
 
 **슬라이드 요소 내용:**
-- 제목 텍스트 상자: `${dept.name} 부서`
-- 부서장 텍스트 상자: `부서장: ${dept.manager}`
-- 인원수 텍스트 상자: `인원: ${dept.members.Length}명`
-- 실적 차트 (이름: "dept_chart"): 
-  ```
-  ${ppt.Chart("dept.performance", title: "${dept.name} 부서 실적")}
-  ```
-- 팀원 1: `${member[0].name} (${member[0].position})`
-- 팀원 2: `${member[1].name} (${member[1].position})`
-- 팀원 3-8: (유사한 형식으로 계속)
+- 제목 텍스트 상자: `${Department.Name} 부서`
+- 부서장 텍스트 상자: `부서장: ${Department.Manager}`
+- 인원수 텍스트 상자: `인원: ${Department.Members.Length}명`
+- 팀원 1: `${Department.Members[0].Name} (${Department.Members[0].Position})`
+- 팀원 2: `${Department.Members[1].Name} (${Department.Members[1].Position})`
+- 팀원 3: `${Department.Members[2].Name} (${Department.Members[2].Position})`
+- 팀원 4: `${Department.Members[3].Name} (${Department.Members[3].Position})`
+- 팀원 5: `${Department.Members[4].Name} (${Department.Members[4].Position})`
+- 팀원 6: `${Department.Members[5].Name} (${Department.Members[5].Position})`
 
 **슬라이드 노트:**
 ```
-#foreach: departments as dept
+#if: Department.Members.Length > 0, target: "MembersContainer"
 ```
 
-### 여러 컬렉션 동시 표시 (관련 데이터)
+**결과:**
+- 부서에 15명의 팀원이 있다면:
+  - 첫번째 슬라이드: 0~5번 팀원
+  - 두번째 슬라이드: 6~11번 팀원
+  - 세번째 슬라이드: 12~14번 팀원 (나머지 자리는 빈 값)
 
-**슬라이드 요소 내용:**
-- 제목 텍스트 상자: `${category.name} - ${product.name}`
-- 제품 설명: `${product.description}`
-- 카테고리 설명: `${category.description}`
+## 배열처리 세부 설명
 
-**슬라이드 노트:**
+### 중요 개념
+
+1. **디자인 우선**: PowerPoint는 배열 처리에서도 미리 디자인된 요소에 데이터를 바인딩하는 방식 사용
+2. **자동 슬라이드 복제**: 배열 데이터가 한 슬라이드에 모두 표시할 수 없는 경우 슬라이드 자동 복제
+3. **인덱스 자동 조정**: 복제된 슬라이드에서 인덱스 참조 자동 조정
+4. **불필요한 지시문 최소화**: 별도의 반복 지시문 없이 엔진이 배열 패턴 자동 감지
+
+### 작동 방식 상세
+
+1. **인덱스 패턴 분석**: 슬라이드 내 모든 `${Array[Index]}` 참조 스캔
+2. **최대 인덱스 파악**: 한 슬라이드 내 가장 높은 인덱스 값 결정
+3. **항목수 계산**: 최대 인덱스 + 1 = 한 슬라이드에 표시될 항목 수
+4. **필요 슬라이드 계산**: 데이터 크기 ÷ 슬라이드당 항목 수 = 필요한 슬라이드 수
+5. **슬라이드 복제**: 원본 슬라이드 디자인을 유지하며 필요한 만큼 복제
+6. **인덱스 매핑**: 각 슬라이드에서 인덱스 자동 조정
+   - 첫번째 슬라이드: 원본 인덱스 사용
+   - 두번째 슬라이드: 원본 인덱스 + 슬라이드당 항목 수
+   - 세번째 슬라이드: 원본 인덱스 + (슬라이드당 항목 수 × 2)
+
+### 예시: 부서별 멤버 리스트
+
+**슬라이드 디자인**:
+- 제목: `${Department.Name}`
+- 멤버 1: `${Department.Members[0].Name}`
+- 멤버 2: `${Department.Members[1].Name}`
+- 멤버 3: `${Department.Members[2].Name}`
+
+**데이터**: 부서에 8명의 멤버
+
+**결과**:
+- 첫번째 슬라이드:
+  - 제목: "영업부"
+  - 멤버 1: "홍길동" (`Members[0]`)
+  - 멤버 2: "김철수" (`Members[1]`)
+  - 멤버 3: "이영희" (`Members[2]`)
+- 두번째 슬라이드:
+  - 제목: "영업부"
+  - 멤버 1: "박지성" (`Members[3]`)
+  - 멤버 2: "손흥민" (`Members[4]`)
+  - 멤버 3: "장미란" (`Members[5]`)
+- 세번째 슬라이드:
+  - 제목: "영업부"
+  - 멤버 1: "김연아" (`Members[6]`)
+  - 멤버 2: "이승기" (`Members[7]`)
+  - 멤버 3: (빈 값)
+
+### 빈 값 처리
+
+배열 인덱스가 실제 데이터 범위를 초과할 경우:
+1. **텍스트 요소**: 빈 문자열("")로 대체
+2. **이미지 요소**: 기본 이미지로 대체 또는 숨김
+3. **차트/표 요소**: 데이터 없음 상태로 표시 또는 숨김
+
+### 조건부 요소 처리
+
+배열 데이터와 조건부 표시를 결합:
 ```
-#foreach: Products as product, Categories as category
+#if: Department.Members.Length > ${Index}, target: "Member_${Index}"
 ```
 
-이 예제에서는 Products와 Categories 배열을 동시에 처리하며, 인덱스가 같은 항목끼리 매칭됩니다.
+이 방식으로 해당 인덱스에 멤버가 없는 경우 요소를 숨길 수 있습니다.

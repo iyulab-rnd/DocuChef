@@ -11,19 +11,19 @@ namespace DocuChef.PowerPoint;
 internal partial class PowerPointProcessor
 {
     /// <summary>
-    /// Process a slide-level directive (e.g., #foreach)
+    /// Process a slide-level directive (e.g., #if)
     /// </summary>
     private void ProcessSlideDirective(PresentationPart presentationPart, SlidePart slidePart, DirectiveContext directive)
     {
         _context.Directive = directive;
 
-        // Handle foreach directive for slide duplication
-        if (directive.Name == "foreach")
+        // Handle if directive for slide-level conditions
+        if (directive.Name == "if")
         {
-            ProcessForeachDirective(presentationPart, slidePart, directive);
+            ProcessSlideIfDirective(presentationPart, slidePart, directive);
         }
 
-        // Add support for other slide-level directives as needed
+        // Other slide-level directives can be added here as needed
     }
 
     /// <summary>
@@ -50,236 +50,43 @@ internal partial class PowerPointProcessor
     }
 
     /// <summary>
-    /// Process foreach directive to create multiple slides from a template slide
+    /// Process slide-level if directive
     /// </summary>
-    private void ProcessForeachDirective(PresentationPart presentationPart, SlidePart templateSlidePart, DirectiveContext directive)
+    private void ProcessSlideIfDirective(PresentationPart presentationPart, SlidePart slidePart, DirectiveContext directive)
     {
-        string collectionName = directive.Value;
-        string itemName = directive.Parameters.TryGetValue("itemName", out var itemParam) ? itemParam : "item";
+        string condition = directive.Value.Trim();
+        Logger.Debug($"Processing slide-level if directive with condition: {condition}");
 
-        Logger.Debug($"Processing foreach with collection: {collectionName}, item: {itemName}");
-
-        // Resolve collection from variables
-        object collectionObj = ResolveVariableValue(collectionName);
-        if (collectionObj == null)
-        {
-            Logger.Warning($"Collection '{collectionName}' not found for foreach directive");
-            return;
-        }
-
-        // 컬렉션이 아닌 경우 처리
-        if (!(collectionObj is IEnumerable collection))
-        {
-            Logger.Warning($"Variable '{collectionName}' is not a collection type");
-            return;
-        }
-
-        // Convert to list for easier processing
-        List<object> items = collection.Cast<object>().ToList();
-        if (items.Count == 0)
-        {
-            Logger.Debug("Collection is empty, no slides to generate");
-            return;
-        }
-
-        // Find the maximum index referenced in slide shapes to determine items per slide
-        int maxIndexReferenced = FindMaxIndexReferenced(templateSlidePart, itemName);
-        if (maxIndexReferenced < 0)
-        {
-            Logger.Warning($"No indexed references found for item '{itemName}' in slide, using 1 item per slide");
-            maxIndexReferenced = 0; // 기본값 0으로 설정 (1개 항목)
-        }
-
-        // Items per slide is maxIndexReferenced + 1 (since indexes are zero-based)
-        int itemsPerSlide = maxIndexReferenced + 1;
-        Logger.Debug($"Detected {itemsPerSlide} items per slide based on references in template");
-
-        // Calculate number of slides needed
-        int slidesNeeded = (int)Math.Ceiling((double)items.Count / itemsPerSlide);
-        slidesNeeded = Math.Min(slidesNeeded, _options.MaxSlidesFromTemplate);
-        Logger.Debug($"Need to create {slidesNeeded} slides for {items.Count} items");
-
-        // Find template slide in presentation
-        var slideIdList = presentationPart.Presentation.SlideIdList;
-        var slideIds = slideIdList.ChildElements.OfType<P.SlideId>().ToList();
-        int templateIndex = slideIds.FindIndex(id => id.RelationshipId == presentationPart.GetIdOfPart(templateSlidePart));
-
-        if (templateIndex == -1)
-        {
-            Logger.Error("Template slide not found in presentation");
-            return;
-        }
-
-        uint maxSlideId = slideIds.Max(id => id.Id.Value);
-        int insertPosition = templateIndex + 1;
-
-        // Save original template content
-        DocumentFormat.OpenXml.OpenXmlElement originalSlideContent = null;
         try
         {
-            // Clone the original slide content for reference
-            originalSlideContent = templateSlidePart.Slide.CloneNode(true);
-            Logger.Debug("Original slide content saved for reference");
+            // Evaluate the condition
+            var result = EvaluateDirectiveCondition(condition);
+            bool conditionResult = false;
+
+            // Convert result to boolean
+            if (result is bool boolValue)
+            {
+                conditionResult = boolValue;
+            }
+            else if (result != null)
+            {
+                conditionResult = Convert.ToBoolean(result);
+            }
+
+            Logger.Debug($"Slide condition evaluated to: {conditionResult}");
+
+            // If condition is false, hide this slide
+            if (!conditionResult)
+            {
+                // Hide slide logic would be implemented here
+                // This is a placeholder as slide visibility is complex in OpenXML
+                Logger.Debug($"Condition is false, slide should be hidden");
+            }
         }
         catch (Exception ex)
         {
-            Logger.Warning($"Could not clone original slide content: {ex.Message}");
+            Logger.Error($"Error processing slide if directive: {condition}", ex);
         }
-
-        // Process each slide
-        for (int slideIndex = 0; slideIndex < slidesNeeded; slideIndex++)
-        {
-            // Calculate item range for this slide
-            int startIndex = slideIndex * itemsPerSlide;
-            int endIndex = Math.Min(startIndex + itemsPerSlide, items.Count);
-            var slideItems = items.Skip(startIndex).Take(endIndex - startIndex).ToList();
-
-            SlidePart slidePart;
-
-            // Use template slide for first batch, clone for others
-            if (slideIndex == 0)
-            {
-                slidePart = templateSlidePart;
-            }
-            else
-            {
-                // Clone template slide
-                slidePart = CloneSlidePart(presentationPart, templateSlidePart);
-                string newRelId = presentationPart.GetIdOfPart(slidePart);
-
-                // Add new slide to presentation
-                P.SlideId newSlideId = new P.SlideId
-                {
-                    Id = maxSlideId + (uint)slideIndex,
-                    RelationshipId = newRelId
-                };
-
-                slideIdList.InsertAt(newSlideId, insertPosition++);
-            }
-
-            // Process this slide with its items
-            ProcessSlideItems(slidePart, slideItems, itemName, slideIndex, itemsPerSlide);
-
-            Logger.Debug($"Processed slide {slideIndex + 1} with {slideItems.Count} items");
-        }
-
-        // Save presentation
-        presentationPart.Presentation.Save();
-    }
-
-    /// <summary>
-    /// Finds the maximum index referenced in a slide's shapes for a given item name
-    /// </summary>
-    private int FindMaxIndexReferenced(SlidePart slidePart, string itemName)
-    {
-        int maxIndex = -1;
-        var shapes = slidePart.Slide.Descendants<P.Shape>().ToList();
-
-        // Regular expression to find item references with indexes: ${item[0].Id} 또는 item[0]
-        var regex = new Regex($@"\${{?{itemName}\[(\d+)\](?:\.[\w]+)?}}?");
-
-        foreach (var shape in shapes)
-        {
-            var textRuns = shape.Descendants<A.Text>().ToList();
-            foreach (var textRun in textRuns)
-            {
-                if (string.IsNullOrEmpty(textRun.Text))
-                    continue;
-
-                var matches = regex.Matches(textRun.Text);
-                foreach (Match match in matches)
-                {
-                    if (match.Groups.Count > 1 && int.TryParse(match.Groups[1].Value, out int index))
-                    {
-                        maxIndex = Math.Max(maxIndex, index);
-                    }
-                }
-            }
-        }
-
-        Logger.Debug($"Maximum index referenced for '{itemName}': {maxIndex}");
-        return maxIndex;
-    }
-
-    /// <summary>
-    /// Process a slide with specific items
-    /// </summary>
-    private void ProcessSlideItems(SlidePart slidePart, List<object> slideItems, string itemName, int slideIndex, int itemsPerSlide)
-    {
-        // Update context for this slide
-        _context.SlidePart = slidePart;
-
-        // Add batch info to variables
-        _context.Variables["_batchIndex"] = slideIndex;
-        _context.Variables["_batchStart"] = slideIndex * itemsPerSlide + 1; // 1-based index
-        _context.Variables["_batchEnd"] = slideIndex * itemsPerSlide + slideItems.Count;
-        _context.Variables["_batchCount"] = slideItems.Count;
-
-        // Create a mapped dictionary for item references
-        // This allows template to use ${item[0]}, ${item[1]} etc. which will be mapped to appropriate collection items
-        var itemsDict = new Dictionary<string, object>();
-
-        // Populate the dictionary with items AND indexed references for each item
-        for (int i = 0; i < itemsPerSlide; i++)
-        {
-            if (i < slideItems.Count)
-            {
-                // 전체 항목 배열을 관리하기 위한 특별 항목 추가
-                itemsDict[$"{itemName}s"] = slideItems;
-
-                // 개별 항목 참조 설정
-                var currentItem = slideItems[i];
-                itemsDict[$"{itemName}[{i}]"] = currentItem;
-
-                // 객체 속성 접근을 위한 인덱스 기반 참조 설정
-                if (currentItem != null)
-                {
-                    var properties = currentItem.GetType().GetProperties();
-                    foreach (var prop in properties)
-                    {
-                        if (prop.CanRead)
-                        {
-                            try
-                            {
-                                var value = prop.GetValue(currentItem);
-                                itemsDict[$"{itemName}[{i}].{prop.Name}"] = value;
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.Warning($"Error getting property {prop.Name}: {ex.Message}");
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // For indexes beyond available items, provide empty values to avoid errors
-                itemsDict[$"{itemName}[{i}]"] = null;
-            }
-        }
-
-        // Add the items dictionary to the context variables
-        foreach (var kvp in itemsDict)
-        {
-            _context.Variables[kvp.Key] = kvp.Value;
-        }
-
-        // Additionally, set the first item as the named item for compatibility
-        if (slideItems.Count > 0)
-        {
-            _context.Variables[itemName] = slideItems[0];
-
-            // 슬라이드 내에서 전체 컬렉션 참조가 가능하도록 설정
-            _context.Variables[$"{itemName}s"] = slideItems;
-
-            // 추가 개선: 자주 사용되는 컬렉션 접근 방식
-            _context.Variables["batch_items"] = slideItems;
-            _context.Variables["current_item"] = slideItems[0];
-        }
-
-        // Process text replacements for this slide
-        ProcessTextReplacements(slidePart);
     }
 
     /// <summary>

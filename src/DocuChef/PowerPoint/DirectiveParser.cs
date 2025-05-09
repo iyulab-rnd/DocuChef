@@ -52,7 +52,7 @@ internal static class DirectiveParser
                     ParseParameters(paramString, directive.Parameters);
                 }
 
-                // Add special handling for directive-specific parameters based on PPT syntax
+                // Add special handling for directive-specific parameters
                 ProcessDirectiveSpecificParameters(directive);
 
                 directives.Add(directive);
@@ -143,73 +143,19 @@ internal static class DirectiveParser
     /// </summary>
     private static void ProcessDirectiveSpecificParameters(DirectiveContext directive)
     {
-        // Handle foreach directive
-        if (directive.Name == "foreach")
+        // Specific handling for the 'if' directive
+        if (directive.Name == "if")
         {
-            // Check for "as" keyword in the value (collection as item)
-            var match = Regex.Match(directive.Value, @"(.+?)\s+as\s+(.+)");
-            if (match.Success)
-            {
-                string collectionName = match.Groups[1].Value.Trim();
-                string itemName = match.Groups[2].Value.Trim();
+            // Ensure condition is properly formatted
+            directive.Value = directive.Value.Trim();
 
-                directive.Value = collectionName;
-                directive.Parameters["itemName"] = itemName;
-                Logger.Debug($"Parsed 'as' clause in foreach: collection={collectionName}, item={itemName}");
-            }
-            else
+            // If target is not specified, look for it in parameters
+            if (!directive.Parameters.ContainsKey("target"))
             {
-                // Auto-determine item name from collection name as per PPT syntax guidelines
-                string itemName = DetermineItemNameFromCollection(directive.Value);
-                directive.Parameters["itemName"] = itemName;
-                Logger.Debug($"Auto-determined item name: {itemName} from collection: {directive.Value}");
+                Logger.Warning($"If directive missing required 'target' parameter: {directive.Value}");
             }
         }
-    }
 
-    /// <summary>
-    /// Determines item name from collection name according to PPT syntax guidelines
-    /// </summary>
-    private static string DetermineItemNameFromCollection(string collectionName)
-    {
-        // Remove any whitespace or quotes
-        collectionName = collectionName.Trim();
-        if (collectionName.StartsWith("\"") && collectionName.EndsWith("\""))
-        {
-            collectionName = collectionName.Substring(1, collectionName.Length - 2);
-        }
-
-        // Get the base name without any path (e.g., "data.Items" -> "Items")
-        string baseName = collectionName;
-        if (collectionName.Contains("."))
-        {
-            baseName = collectionName.Split('.').Last();
-        }
-
-        // Rule 1: If ends with 's', remove the 's' for singular form
-        if (baseName.EndsWith("s", StringComparison.OrdinalIgnoreCase) && baseName.Length > 1)
-        {
-            // Handle special cases
-            if (baseName.EndsWith("ies", StringComparison.OrdinalIgnoreCase))
-            {
-                // e.g., "Categories" -> "category"
-                return baseName.Substring(0, baseName.Length - 3) + "y";
-            }
-            if (baseName.EndsWith("es", StringComparison.OrdinalIgnoreCase) &&
-                (baseName.EndsWith("xes", StringComparison.OrdinalIgnoreCase) ||
-                 baseName.EndsWith("ches", StringComparison.OrdinalIgnoreCase) ||
-                 baseName.EndsWith("shes", StringComparison.OrdinalIgnoreCase) ||
-                 baseName.EndsWith("sses", StringComparison.OrdinalIgnoreCase)))
-            {
-                // e.g., "Boxes" -> "box"
-                return baseName.Substring(0, baseName.Length - 2);
-            }
-
-            // Regular case: "Items" -> "item"
-            return baseName.Substring(0, baseName.Length - 1);
-        }
-
-        // Rule 2: For non-standard plural forms or non-plural names, use lowercase
-        return baseName.ToLowerInvariant();
+        // Add other directive-specific processing as needed
     }
 }

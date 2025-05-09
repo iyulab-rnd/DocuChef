@@ -1,4 +1,6 @@
-﻿using DocumentFormat.OpenXml.Packaging;
+﻿using DocuChef.PowerPoint.Helpers;
+using DocumentFormat.OpenXml.Packaging;
+using System.Text;
 using System.Text.RegularExpressions;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
@@ -6,106 +8,231 @@ using P = DocumentFormat.OpenXml.Presentation;
 namespace DocuChef.PowerPoint;
 
 /// <summary>
-/// PowerPointProcessor 부분 클래스 - 텍스트 처리 메서드
+/// Text processing methods for PowerPointProcessor
 /// </summary>
 internal partial class PowerPointProcessor
 {
     /// <summary>
-    /// 슬라이드의 텍스트 교체 처리
+    /// Process text replacements in slide with formatting preservation
     /// </summary>
     private void ProcessTextReplacements(SlidePart slidePart)
     {
-        // 텍스트 처리 헬퍼를 통해 모든 도형의 텍스트 처리
-        _textHelper.ProcessTextReplacements(slidePart);
+        try
+        {
+            Logger.Debug($"Processing text replacements in slide {slidePart.Uri}");
+
+            // Get all shape elements in the slide
+            var shapes = slidePart.Slide.Descendants<P.Shape>().ToList();
+            bool hasChanges = false;
+
+            // Prepare variables for expression evaluation
+            var variables = PrepareVariables();
+
+            // Create a FormattedTextProcessor for enhanced handling
+            var formattedTextProcessor = new FormattedTextProcessor(this, variables);
+
+            // Process each shape
+            foreach (var shape in shapes)
+            {
+                // Update shape context
+                _context.Shape = new ShapeContext
+                {
+                    Name = shape.GetShapeName(),
+                    Id = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value.ToString(),
+                    Text = shape.GetText(),
+                    ShapeObject = shape
+                };
+
+                Logger.Debug($"Processing shape: {_context.Shape.Name ?? "(unnamed)"}");
+
+                // Process text with formatting preservation
+                bool shapeChanged = false;
+
+                // First, try the enhanced FormattedTextProcessor
+                if (_options.PreserveTextFormatting)
+                {
+                    shapeChanged = formattedTextProcessor.ProcessShapeTextWithFormatting(shape);
+                    Logger.Debug($"Processed shape with formatting preservation, changed: {shapeChanged}");
+                }
+
+                // If no changes or formatting not to be preserved, try SetTextWithExpressions approach
+                if (!shapeChanged && _options.PreserveTextFormatting)
+                {
+                    shapeChanged = shape.SetTextWithExpressions(this, variables);
+                    Logger.Debug($"Processed shape with SetTextWithExpressions, changed: {shapeChanged}");
+                }
+
+                // If still no changes, try basic method as last resort
+                if (!shapeChanged)
+                {
+                    shapeChanged = ProcessShapeText(shape);
+                    Logger.Debug($"Processed shape with basic method, changed: {shapeChanged}");
+                }
+
+                if (shapeChanged)
+                    hasChanges = true;
+            }
+
+            // Save if any changes were made
+            if (hasChanges)
+            {
+                slidePart.Slide.Save();
+                Logger.Debug("Slide saved with updated text");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Error processing text replacements: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
-    /// PowerPoint 도형에서 특수 함수 처리 (이미지, 차트, 표 등)
+    /// Process text in a shape with a direct approach (no formatting preservation)
     /// </summary>
-    private bool ProcessPowerPointFunction(P.Shape shape, A.Text textRun)
+    private bool ProcessShapeText(P.Shape shape)
     {
-        string text = textRun.Text;
-        Logger.Debug($"Processing PowerPoint function: {text}");
-        bool textModified = false;
+        if (shape.TextBody == null)
+            return false;
 
         try
         {
-            // 변수 딕셔너리 준비
-            var variables = PrepareVariables();
+            // Get complete text from shape
+            string completeText = shape.GetText();
+            if (string.IsNullOrEmpty(completeText) || !ContainsExpressions(completeText))
+                return false;
 
-            // 텍스트에서 모든 ppt. 함수 표현식 추출
-            var matches = Regex.Matches(text, @"\${ppt\.(\w+)\(([^)]*)\)}");
+            // Process the complete text
+            string processedText = ProcessExpressions(completeText);
+            if (processedText == completeText)
+                return false;
 
-            if (matches.Count > 0)
+            // Update the shape text (this will lose formatting)
+            shape.SetText(processedText);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Error processing shape text: {ex.Message}", ex);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Process expressions in text
+    /// </summary>
+    private string ProcessExpressions(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        // Prepare variables
+        var variables = PrepareVariables();
+
+        // Process ${...} expressions
+        return Regex.Replace(text, @"\${([^{}]+)}", match => {
+            try
             {
-                // 전체 텍스트가 단일 함수 호출인 경우
+                var expressionValue = EvaluateCompleteExpression(match.Value, variables);
+                Logger.Debug($"Evaluated expression '{match.Value}' to '{expressionValue}'");
+                return expressionValue?.ToString() ?? "";
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Error evaluating expression '{match.Value}': {ex.Message}");
+                return match.Value; // Keep original on error
+            }
+        });
+    }
+
+    /// <summary>
+    /// Check if text contains expressions
+    /// </summary>
+    private bool ContainsExpressions(string text)
+    {
+        return !string.IsNullOrEmpty(text) && text.Contains("${");
+    }
+
+    /// <summary>
+    /// Process PowerPoint functions like ${ppt.Image(...)}
+    /// </summary>
+    private bool ProcessPowerPointFunctions(P.Shape shape)
+    {
+        if (shape.TextBody == null)
+            return false;
+
+        // Look for PowerPoint functions in all text runs
+        bool hasChanges = false;
+        var variables = PrepareVariables();
+
+        foreach (var paragraph in shape.TextBody.Elements<A.Paragraph>().ToList())
+        {
+            foreach (var run in paragraph.Elements<A.Run>().ToList())
+            {
+                var textElement = run.GetFirstChild<A.Text>();
+                if (textElement == null || string.IsNullOrEmpty(textElement.Text))
+                    continue;
+
+                string text = textElement.Text;
+
+                // Check for ppt. functions
+                if (!text.Contains("${ppt."))
+                    continue;
+
+                // Extract function expressions
+                var matches = Regex.Matches(text, @"\${ppt\.(\w+)\(([^)]*)\)}");
+                if (matches.Count == 0)
+                    continue;
+
+                // Process when the entire text is a function call
                 if (matches.Count == 1 && matches[0].Value == text)
                 {
                     string functionName = matches[0].Groups[1].Value;
                     string parametersString = matches[0].Groups[2].Value;
 
-                    Logger.Debug($"Function: {functionName}, Parameters: {parametersString}");
+                    Logger.Debug($"Processing PowerPoint function: {functionName}({parametersString})");
 
-                    // 함수가 존재하면 실행
+                    // Find the function
                     if (_context.Functions.TryGetValue(functionName, out var function))
                     {
-                        // 도형 컨텍스트 업데이트
+                        // Update context for this shape
                         _context.Shape.ShapeObject = shape;
 
-                        // 매개변수 파싱
+                        // Parse parameters
                         var parameters = ParseFunctionParameters(parametersString);
 
-                        // 함수 핸들러 호출
-                        Logger.Debug($"Executing function {functionName} with parameters: {string.Join(", ", parameters)}");
+                        // Execute function
                         var result = function.Execute(_context, null, parameters);
 
-                        // 함수 결과 처리
+                        // Handle result
                         if (result is string resultText)
                         {
-                            if (string.IsNullOrEmpty(resultText))
-                            {
-                                // 성공 케이스 (예: 이미지가 성공적으로 처리됨)
-                                textRun.Text = "";
-                                Logger.Debug($"Function {functionName} executed successfully with empty result");
-                            }
-                            else
-                            {
-                                // 결과 텍스트 또는 오류 메시지
-                                textRun.Text = resultText;
-                                Logger.Debug($"Function {functionName} result: {resultText}");
-                            }
-                            textModified = true;
+                            textElement.Text = resultText;
+                            hasChanges = true;
                         }
                     }
                     else
                     {
                         Logger.Warning($"Function not found: {functionName}");
-                        textRun.Text = $"[Unknown function: {functionName}]";
-                        textModified = true;
                     }
                 }
-                // 텍스트에 여러 표현식이 있거나 혼합 콘텐츠가 있는 경우
                 else
                 {
-                    // 전체 텍스트를 평가하기 위해 DollarSignEngine 사용
-                    var result = _expressionEvaluator.Evaluate(text, variables);
-                    textRun.Text = result?.ToString() ?? "";
-                    textModified = true;
+                    // Process mixed content with functions
+                    string processedText = ProcessExpressions(text);
+                    if (processedText != text)
+                    {
+                        textElement.Text = processedText;
+                        hasChanges = true;
+                    }
                 }
             }
         }
-        catch (Exception ex)
-        {
-            Logger.Error($"Error processing PowerPoint function: {text}", ex);
-            textRun.Text = $"[Error: {ex.Message}]";
-            textModified = true;
-        }
 
-        return textModified;
+        return hasChanges;
     }
 
     /// <summary>
-    /// PPT 구문 지침에 따라 함수 매개변수 파싱
+    /// Parse function parameters
     /// </summary>
     private string[] ParseFunctionParameters(string parametersString)
     {
@@ -115,76 +242,40 @@ internal partial class PowerPointProcessor
         var results = new List<string>();
         bool inQuotes = false;
         int currentStart = 0;
-        int parenDepth = 0;
 
         for (int i = 0; i < parametersString.Length; i++)
         {
             char c = parametersString[i];
 
-            // 인용 부호 처리 (따옴표 문자열의 시작/끝)
+            // Handle quotes
             if (c == '"' && (i == 0 || parametersString[i - 1] != '\\'))
             {
                 inQuotes = !inQuotes;
             }
-            // 중첩 괄호 처리
-            else if (!inQuotes && c == '(')
-            {
-                parenDepth++;
-            }
-            else if (!inQuotes && c == ')')
-            {
-                parenDepth--;
-            }
-            // 매개변수 구분자 (최상위 레벨에서만, 인용부호나 중첩 괄호 안에서는 무시)
-            else if (c == ',' && !inQuotes && parenDepth == 0)
+            // Handle parameter separators
+            else if (c == ',' && !inQuotes)
             {
                 results.Add(parametersString.Substring(currentStart, i - currentStart).Trim());
                 currentStart = i + 1;
             }
         }
 
-        // 마지막 매개변수 추가
+        // Add the last parameter
         results.Add(parametersString.Substring(currentStart).Trim());
 
-        // 따옴표 문자열과 명명된 매개변수 정리
+        // Clean up parameters
         for (int i = 0; i < results.Count; i++)
         {
             var param = results[i].Trim();
 
-            // 명명된 매개변수 처리 (param: value)
-            if (param.Contains(":") && !inQuotes)
+            // Remove quotes from string parameters
+            if (param.StartsWith("\"") && param.EndsWith("\"") && param.Length > 1)
             {
-                var parts = param.Split(new[] { ':' }, 2);
-                string paramName = parts[0].Trim();
-                string paramValue = parts[1].Trim();
-
-                // 매개변수 값이 따옴표로 묶여 있으면 따옴표 제거
-                if (paramValue.StartsWith("\"") && paramValue.EndsWith("\"") && paramValue.Length > 1)
-                {
-                    paramValue = paramValue.Substring(1, paramValue.Length - 2)
-                        .Replace("\\\"", "\"")
-                        .Replace("\\\\", "\\")
-                        .Replace("\\n", "\n")
-                        .Replace("\\r", "\r");
-                }
-
-                results[i] = $"{paramName}: {paramValue}";
-            }
-            // 일반 따옴표 문자열 처리
-            else if (param.StartsWith("\"") && param.EndsWith("\"") && param.Length > 1)
-            {
-                // 따옴표와 이스케이프된 문자 처리
-                param = param.Substring(1, param.Length - 2)
-                    .Replace("\\\"", "\"")
-                    .Replace("\\\\", "\\")
-                    .Replace("\\n", "\n")
-                    .Replace("\\r", "\r");
-
+                param = param.Substring(1, param.Length - 2);
                 results[i] = param;
             }
         }
 
-        Logger.Debug($"Parsed parameters: {string.Join(", ", results)}");
         return results.ToArray();
     }
 }

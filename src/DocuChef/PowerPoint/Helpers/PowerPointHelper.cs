@@ -3,7 +3,7 @@ using DocumentFormat.OpenXml.Presentation;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
 
-namespace DocuChef.PowerPoint;
+namespace DocuChef.PowerPoint.Helpers;
 
 internal static class PowerPointHelper
 {
@@ -68,7 +68,7 @@ internal static class PowerPointHelper
     /// <summary>
     /// 이미지를 포함하는 Picture 요소를 생성합니다.
     /// </summary>
-    public static P.Picture CreatePicture(
+    public static Picture CreatePicture(
         string relationshipId,
         uint shapeId,
         string shapeName,
@@ -83,24 +83,24 @@ internal static class PowerPointHelper
                      $"Position=({x}, {y}), Size=({width}, {height})");
 
         // 새 Picture 요소 생성
-        P.Picture picture = new P.Picture();
+        Picture picture = new Picture();
 
         // NonVisualPictureProperties 설정
-        var nvPicProps = new P.NonVisualPictureProperties(
-            new P.NonVisualDrawingProperties()
+        var nvPicProps = new NonVisualPictureProperties(
+            new NonVisualDrawingProperties()
             {
                 Id = shapeId,
                 Name = shapeName
             },
-            new P.NonVisualPictureDrawingProperties(
+            new NonVisualPictureDrawingProperties(
                 new A.PictureLocks() { NoChangeAspect = preserveAspectRatio }
             ),
-            new P.ApplicationNonVisualDrawingProperties()
+            new ApplicationNonVisualDrawingProperties()
         );
         picture.AppendChild(nvPicProps);
 
         // BlipFill 설정
-        var blipFill = new P.BlipFill();
+        var blipFill = new BlipFill();
         var blip = new A.Blip() { Embed = relationshipId };
         blipFill.AppendChild(blip);
         blipFill.AppendChild(new A.SourceRectangle());
@@ -110,7 +110,7 @@ internal static class PowerPointHelper
         picture.AppendChild(blipFill);
 
         // ShapeProperties 설정
-        var shapeProps = new P.ShapeProperties();
+        var shapeProps = new ShapeProperties();
         var transform2D = new A.Transform2D();
         transform2D.Offset = new A.Offset() { X = x, Y = y };
         transform2D.Extents = new A.Extents() { Cx = width, Cy = height };
@@ -145,12 +145,12 @@ internal static class PowerPointHelper
     /// <summary>
     /// 슬라이드에서 도형 이름으로 도형을 찾습니다.
     /// </summary>
-    public static P.Shape FindShapeByName(SlidePart slidePart, string shapeName)
+    public static Shape FindShapeByName(SlidePart slidePart, string shapeName)
     {
         if (slidePart?.Slide == null || string.IsNullOrEmpty(shapeName))
             return null;
 
-        foreach (var shape in slidePart.Slide.Descendants<P.Shape>())
+        foreach (var shape in slidePart.Slide.Descendants<Shape>())
         {
             string currentName = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Name?.Value;
             if (shapeName == currentName)

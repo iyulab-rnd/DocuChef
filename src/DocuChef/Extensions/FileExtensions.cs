@@ -25,27 +25,30 @@ public static class FileExtensions
     /// <summary>
     /// Gets content type based on file extension
     /// </summary>
-    public static string? GetContentType(this string fileExtension)
+    public static string GetContentType(this string fileExtension)
     {
         if (string.IsNullOrEmpty(fileExtension))
             return null;
 
+        if (fileExtension.StartsWith("."))
+            fileExtension = fileExtension.Substring(1);
+
         return fileExtension.ToLowerInvariant() switch
         {
-            ".png" => "image/png",
-            ".jpg" => "image/jpeg",
-            ".jpeg" => "image/jpeg",
-            ".gif" => "image/gif",
-            ".bmp" => "image/bmp",
-            ".tiff" => "image/tiff",
-            ".tif" => "image/tiff",
-            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".xls" => "application/vnd.ms-excel",
-            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            ".ppt" => "application/vnd.ms-powerpoint",
-            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".doc" => "application/vnd.ms-word",
-            ".pdf" => "application/pdf",
+            "png" => "image/png",
+            "jpg" => "image/jpeg",
+            "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "bmp" => "image/bmp",
+            "tiff" => "image/tiff",
+            "tif" => "image/tiff",
+            "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xls" => "application/vnd.ms-excel",
+            "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "ppt" => "application/vnd.ms-powerpoint",
+            "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "doc" => "application/vnd.ms-word",
+            "pdf" => "application/pdf",
             _ => null
         };
     }
@@ -69,7 +72,6 @@ public static class FileExtensions
                 return newPath;
         }
 
-        // If we get here, use a GUID part
         return Path.Combine(directory, $"{filename} ({Guid.NewGuid().ToString("N").Substring(0, 8)}){extension}");
     }
 

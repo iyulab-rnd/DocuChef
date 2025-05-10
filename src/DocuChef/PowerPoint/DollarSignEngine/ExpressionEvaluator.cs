@@ -107,63 +107,115 @@ internal class ExpressionEvaluator
             int index = int.Parse(arrayIndexMatch.Groups[2].Value); // e.g., 0, 1, 2
             string propPath = arrayIndexMatch.Groups[4].Success ? arrayIndexMatch.Groups[4].Value : null; // e.g., Id, Name, null
 
+            Logger.Debug($"[EVAL] Array expression: arrayName={arrayName}, index={index}, propPath={propPath}");
+
             // First check if this is a case-insensitive match for "Items"
-            string normalizedName = "Items";
+            string normalizedName = null;
             if (string.Equals(arrayName, "item", StringComparison.OrdinalIgnoreCase))
             {
-                arrayName = normalizedName;
+                normalizedName = "Items";
             }
 
-            // Try to get array from variables
-            if (variables.TryGetValue(arrayName, out var arrayObj) && arrayObj != null)
+            // Try both original and normalized names
+            object arrayObj = null;
+            if (normalizedName != null && variables.TryGetValue(normalizedName, out var normalizedObj))
             {
+                arrayObj = normalizedObj;
+                arrayName = normalizedName;
+            }
+            else if (variables.TryGetValue(arrayName, out var originalObj))
+            {
+                arrayObj = originalObj;
+            }
+
+            if (arrayObj != null)
+            {
+                Logger.Debug($"[EVAL] Found array '{arrayName}' in variables");
+
                 // Handle different collection types
-                if (arrayObj is IList list && index >= 0 && index < list.Count)
+                if (arrayObj is IList list)
                 {
-                    var item = list[index];
+                    Logger.Debug($"[EVAL] Array is IList with count={list.Count}");
+                    if (index >= 0 && index < list.Count)
+                    {
+                        var item = list[index];
+                        Logger.Debug($"[EVAL] Retrieved item at index {index}: {item?.GetType().Name}");
 
-                    // Return the item or its property
-                    if (string.IsNullOrEmpty(propPath))
-                        return item;
+                        // Return the item or its property
+                        if (string.IsNullOrEmpty(propPath))
+                            return item;
 
-                    // Get property value
-                    var property = item.GetType().GetProperty(propPath);
-                    if (property != null)
-                        return property.GetValue(item);
+                        // Get property value
+                        var property = item?.GetType().GetProperty(propPath);
+                        if (property != null)
+                        {
+                            var propValue = property.GetValue(item);
+                            Logger.Debug($"[EVAL] Property '{propPath}' value: {propValue}");
+                            return propValue;
+                        }
+                        else
+                        {
+                            Logger.Warning($"[EVAL] Property '{propPath}' not found on item type {item?.GetType().Name}");
+                        }
+                    }
+                    else
+                    {
+                        Logger.Warning($"[EVAL] Index {index} out of range for array with count {list.Count}");
+                    }
                 }
-                else if (arrayObj is Array array && index >= 0 && index < array.Length)
+                else if (arrayObj is Array array)
                 {
-                    var item = array.GetValue(index);
+                    Logger.Debug($"[EVAL] Array is Array with length={array.Length}");
+                    if (index >= 0 && index < array.Length)
+                    {
+                        var item = array.GetValue(index);
+                        Logger.Debug($"[EVAL] Retrieved item at index {index}: {item?.GetType().Name}");
 
-                    // Return the item or its property
-                    if (string.IsNullOrEmpty(propPath))
-                        return item;
+                        // Return the item or its property
+                        if (string.IsNullOrEmpty(propPath))
+                            return item;
 
-                    // Get property value
-                    var property = item.GetType().GetProperty(propPath);
-                    if (property != null)
-                        return property.GetValue(item);
+                        // Get property value
+                        var property = item?.GetType().GetProperty(propPath);
+                        if (property != null)
+                        {
+                            var propValue = property.GetValue(item);
+                            Logger.Debug($"[EVAL] Property '{propPath}' value: {propValue}");
+                            return propValue;
+                        }
+                    }
                 }
                 else if (arrayObj is IEnumerable enumerable)
                 {
+                    Logger.Debug($"[EVAL] Array is IEnumerable");
                     // Try to get the item by index
                     int currentIndex = 0;
                     foreach (var item in enumerable)
                     {
                         if (currentIndex == index)
                         {
+                            Logger.Debug($"[EVAL] Retrieved item at index {index}: {item?.GetType().Name}");
+
                             // Return the item or its property
                             if (string.IsNullOrEmpty(propPath))
                                 return item;
 
                             // Get property value
-                            var property = item.GetType().GetProperty(propPath);
+                            var property = item?.GetType().GetProperty(propPath);
                             if (property != null)
-                                return property.GetValue(item);
+                            {
+                                var propValue = property.GetValue(item);
+                                Logger.Debug($"[EVAL] Property '{propPath}' value: {propValue}");
+                                return propValue;
+                            }
                         }
                         currentIndex++;
                     }
                 }
+            }
+            else
+            {
+                Logger.Warning($"[EVAL] Array '{arrayName}' not found in variables");
             }
         }
 

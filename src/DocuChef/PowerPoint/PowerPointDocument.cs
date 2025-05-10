@@ -10,6 +10,7 @@ public class PowerPointDocument : IDisposable
     private readonly PresentationDocument _presentationDocument;
     private readonly string _documentPath;
     private bool _isDisposed;
+    private bool _isSaved;
 
     /// <summary>
     /// The underlying OpenXml PresentationDocument instance
@@ -25,6 +26,7 @@ public class PowerPointDocument : IDisposable
     {
         _presentationDocument = presentationDocument ?? throw new ArgumentNullException(nameof(presentationDocument));
         _documentPath = documentPath;
+        _isSaved = false;
     }
 
     /// <summary>
@@ -39,22 +41,23 @@ public class PowerPointDocument : IDisposable
 
         try
         {
-            // Make sure the document is saved
-            _presentationDocument.Save();
-            Logger.Debug($"Presentation document saved to temporary file: {_documentPath}");
+            // Save all document parts
+            SaveAllDocumentParts();
 
-            // Dispose to release the file handle
+            // Dispose the presentation document
             _presentationDocument.Dispose();
-            Logger.Debug("Presentation document disposed.");
+            _isSaved = true;
+            Logger.Debug($"Presentation document disposed properly");
 
-            // Create necessary directories and copy the file
+            // Ensure target directory exists
             filePath.EnsureDirectoryExists();
             Logger.Debug($"Ensured directory exists for: {filePath}");
 
+            // Copy to final location
             File.Copy(_documentPath, filePath, true);
             Logger.Debug($"File copied from {_documentPath} to {filePath}");
 
-            // Verify output file
+            // Verify the output file
             if (!File.Exists(filePath))
             {
                 Logger.Error($"Output file not found after copy: {filePath}");
@@ -89,15 +92,15 @@ public class PowerPointDocument : IDisposable
 
         try
         {
-            // Make sure the document is saved
-            _presentationDocument.Save();
-            Logger.Debug($"Presentation document saved to temporary file: {_documentPath}");
+            // Save all document parts
+            SaveAllDocumentParts();
 
-            // Dispose to release the file handle
+            // Dispose the presentation document
             _presentationDocument.Dispose();
-            Logger.Debug("Presentation document disposed.");
+            _isSaved = true;
+            Logger.Debug($"Presentation document disposed properly");
 
-            // Copy the temporary file to the stream
+            // Copy to stream
             using var fileStream = new FileStream(_documentPath, FileMode.Open, FileAccess.Read);
             fileStream.CopyTo(stream);
             Logger.Debug($"File copied from {_documentPath} to stream.");
@@ -108,6 +111,69 @@ public class PowerPointDocument : IDisposable
         {
             Logger.Error("Failed to save PowerPoint document to stream", ex);
             throw new DocuChefException($"Failed to save PowerPoint document to stream: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Saves all document parts to ensure proper document structure
+    /// </summary>
+    private void SaveAllDocumentParts()
+    {
+        if (_presentationDocument?.PresentationPart == null)
+            return;
+
+        try
+        {
+            // Save the main presentation part
+            _presentationDocument.PresentationPart.Presentation.Save();
+            Logger.Debug("Presentation part saved");
+
+            // Save all slide parts
+            foreach (var slidePart in _presentationDocument.PresentationPart.SlideParts)
+            {
+                if (slidePart?.Slide != null)
+                {
+                    slidePart.Slide.Save();
+                }
+            }
+            Logger.Debug("All slide parts saved");
+
+            // Save all slide master parts
+            foreach (var masterPart in _presentationDocument.PresentationPart.SlideMasterParts)
+            {
+                if (masterPart?.SlideMaster != null)
+                {
+                    masterPart.SlideMaster.Save();
+                }
+            }
+            Logger.Debug("All slide master parts saved");
+
+            // Save theme part if exists
+            if (_presentationDocument.PresentationPart.ThemePart?.Theme != null)
+            {
+                _presentationDocument.PresentationPart.ThemePart.Theme.Save();
+            }
+
+            // Save view properties if exists
+            if (_presentationDocument.PresentationPart.ViewPropertiesPart?.ViewProperties != null)
+            {
+                _presentationDocument.PresentationPart.ViewPropertiesPart.ViewProperties.Save();
+            }
+
+            // Save presentation properties if exists
+            if (_presentationDocument.PresentationPart.PresentationPropertiesPart?.PresentationProperties != null)
+            {
+                _presentationDocument.PresentationPart.PresentationPropertiesPart.PresentationProperties.Save();
+            }
+
+            // Save the document package
+            _presentationDocument.Save();
+            Logger.Debug("Document package saved");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Error saving document parts", ex);
+            throw;
         }
     }
 
@@ -131,10 +197,12 @@ public class PowerPointDocument : IDisposable
         {
             try
             {
-                _presentationDocument?.Dispose();
-                Logger.Debug("Presentation document disposed");
+                if (!_isSaved && _presentationDocument != null)
+                {
+                    _presentationDocument.Dispose();
+                    Logger.Debug("Presentation document disposed during disposal");
+                }
 
-                // Delete the temporary file
                 if (!string.IsNullOrEmpty(_documentPath) && File.Exists(_documentPath))
                 {
                     File.Delete(_documentPath);
@@ -144,7 +212,6 @@ public class PowerPointDocument : IDisposable
             catch (Exception ex)
             {
                 Logger.Error("Error disposing PowerPoint document resources", ex);
-                // Ignore disposal errors
             }
         }
 

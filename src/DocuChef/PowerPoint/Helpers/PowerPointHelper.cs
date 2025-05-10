@@ -3,9 +3,9 @@
 internal static class PowerPointHelper
 {
     /// <summary>
-    /// 이미지 컨텐츠 타입을 확인하고 적절한 ImagePart를 생성합니다.
+    /// Creates appropriate ImagePart based on content type
     /// </summary>
-    public static ImagePart CreateImagePart(SlidePart slidePart, string contentType, string relationshipId)
+    public static ImagePart? CreateImagePart(SlidePart slidePart, string contentType, string relationshipId)
     {
         switch (contentType)
         {
@@ -31,21 +31,28 @@ internal static class PowerPointHelper
     }
 
     /// <summary>
-    /// 도형의 외곽선을 복제합니다.
+    /// Clones shape outline properly
     /// </summary>
-    public static A.Outline CloneOutline(A.Outline originalOutline)
+    public static A.Outline? CloneOutline(A.Outline originalOutline)
     {
         if (originalOutline == null)
             return null;
 
         Logger.Debug("Cloning outline properties");
 
-        // 깊은 복사를 사용하여 모든 속성과 하위 요소 유지
-        return originalOutline.CloneNode(true) as A.Outline;
+        var clonedOutline = originalOutline.CloneNode(true) as A.Outline;
+
+        // Ensure cloned outline is not attached to any parent
+        if (clonedOutline?.Parent != null)
+        {
+            clonedOutline.Remove();
+        }
+
+        return clonedOutline;
     }
 
     /// <summary>
-    /// 도형에 대한 기본 외곽선을 생성합니다.
+    /// Creates default outline for shape
     /// </summary>
     public static A.Outline CreateDefaultOutline(int width = 9525, string colorHex = "000000")
     {
@@ -61,7 +68,7 @@ internal static class PowerPointHelper
     }
 
     /// <summary>
-    /// 이미지를 포함하는 Picture 요소를 생성합니다.
+    /// Creates Picture element with image
     /// </summary>
     public static Picture CreatePicture(
         string relationshipId,
@@ -72,15 +79,14 @@ internal static class PowerPointHelper
         long width,
         long height,
         bool preserveAspectRatio = true,
-        A.Outline outline = null)
+        A.Outline? outline = null)
     {
         Logger.Debug($"Creating picture: RelID={relationshipId}, ID={shapeId}, Name={shapeName}, " +
                      $"Position=({x}, {y}), Size=({width}, {height})");
 
-        // 새 Picture 요소 생성
-        Picture picture = new Picture();
+        var picture = new Picture();
 
-        // NonVisualPictureProperties 설정
+        // NonVisualPictureProperties
         var nvPicProps = new NonVisualPictureProperties(
             new NonVisualDrawingProperties()
             {
@@ -94,7 +100,7 @@ internal static class PowerPointHelper
         );
         picture.AppendChild(nvPicProps);
 
-        // BlipFill 설정
+        // BlipFill
         var blipFill = new BlipFill();
         var blip = new A.Blip() { Embed = relationshipId };
         blipFill.AppendChild(blip);
@@ -104,20 +110,20 @@ internal static class PowerPointHelper
         blipFill.AppendChild(stretch);
         picture.AppendChild(blipFill);
 
-        // ShapeProperties 설정
+        // ShapeProperties
         var shapeProps = new ShapeProperties();
         var transform2D = new A.Transform2D();
         transform2D.Offset = new A.Offset() { X = x, Y = y };
         transform2D.Extents = new A.Extents() { Cx = width, Cy = height };
         shapeProps.AppendChild(transform2D);
 
-        // 도형 형상 설정
+        // Preset geometry
         shapeProps.AppendChild(new A.PresetGeometry(
             new A.AdjustValueList()
         )
         { Preset = A.ShapeTypeValues.Rectangle });
 
-        // 외곽선 설정
+        // Outline
         if (outline != null)
         {
             shapeProps.AppendChild(outline);
@@ -129,18 +135,17 @@ internal static class PowerPointHelper
     }
 
     /// <summary>
-    /// 슬라이드의 기본 크기를 반환합니다. (기본 16:9 비율)
+    /// Gets default slide size (16:9 ratio)
     /// </summary>
     public static (long Width, long Height) GetDefaultSlideSize()
     {
-        // 표준 16:9 슬라이드 크기
-        return (9144000, 6858000); // 10인치 x 7.5인치
+        return (9144000, 6858000); // Standard 16:9 slide
     }
 
     /// <summary>
-    /// 슬라이드에서 도형 이름으로 도형을 찾습니다.
+    /// Finds shape by name in slide
     /// </summary>
-    public static Shape FindShapeByName(SlidePart slidePart, string shapeName)
+    public static Shape? FindShapeByName(SlidePart slidePart, string shapeName)
     {
         if (slidePart?.Slide == null || string.IsNullOrEmpty(shapeName))
             return null;
@@ -151,7 +156,7 @@ internal static class PowerPointHelper
             if (shapeName == currentName)
                 return shape;
 
-            // 대체 방법: Alt Text 확인
+            // Check Alt Text
             var anvdp = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties;
             if (anvdp != null)
             {

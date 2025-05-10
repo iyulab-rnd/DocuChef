@@ -1,9 +1,4 @@
-﻿using DocumentFormat.OpenXml.Packaging;
-using System.Text.RegularExpressions;
-using A = DocumentFormat.OpenXml.Drawing;
-using P = DocumentFormat.OpenXml.Presentation;
-
-namespace DocuChef.PowerPoint;
+﻿namespace DocuChef.PowerPoint;
 
 /// <summary>
 /// Partial class for PowerPointProcessor - Directive processing methods
@@ -145,7 +140,7 @@ internal partial class PowerPointProcessor
 
         try
         {
-            // Evaluate the condition using EvaluateDirectiveCondition instead of EvaluateExpression
+            // Evaluate the condition using EvaluateDirectiveCondition
             var result = EvaluateDirectiveCondition(condition);
             bool conditionResult = false;
 
@@ -187,69 +182,6 @@ internal partial class PowerPointProcessor
         catch (Exception ex)
         {
             Logger.Error($"Error processing if directive: {condition}", ex);
-        }
-    }
-
-    /// <summary>
-    /// Clone chart-related parts
-    /// </summary>
-    private void CloneChartParts(ChartPart sourceChartPart, ChartPart targetChartPart)
-    {
-        // Handle embedding package if present
-        if (sourceChartPart.EmbeddedPackagePart != null)
-        {
-            try
-            {
-                var targetPackagePart = targetChartPart.AddEmbeddedPackagePart("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-                CopyPartContent(sourceChartPart.EmbeddedPackagePart, targetPackagePart);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning($"Failed to clone embedded package part: {ex.Message}");
-            }
-        }
-
-        // Handle other chart-related parts as needed...
-    }
-
-    /// <summary>
-    /// Copy content from one OpenXmlPart to another with error handling
-    /// </summary>
-    private void CopyPartContent(OpenXmlPart source, OpenXmlPart target)
-    {
-        try
-        {
-            using (Stream sourceStream = source.GetStream(FileMode.Open, FileAccess.Read))
-            {
-                sourceStream.Position = 0;
-                using (Stream targetStream = target.GetStream(FileMode.Create, FileAccess.Write))
-                {
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = sourceStream.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        targetStream.Write(buffer, 0, bytesRead);
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning($"Error copying part content: {ex.Message}");
-
-            // Fallback method using FeedData
-            try
-            {
-                using (Stream sourceStream = source.GetStream())
-                {
-                    sourceStream.Position = 0;
-                    target.FeedData(sourceStream);
-                }
-            }
-            catch (Exception feedEx)
-            {
-                Logger.Warning($"Error using FeedData: {feedEx.Message}");
-            }
         }
     }
 }

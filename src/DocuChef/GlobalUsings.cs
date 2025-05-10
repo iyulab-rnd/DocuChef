@@ -1,6 +1,12 @@
-﻿global using DocuChef.Utils;
+﻿global using System.Collections;
+global using System.Text;
+global using DocumentFormat.OpenXml;
+global using DocumentFormat.OpenXml.Packaging;
+global using DocumentFormat.OpenXml.Presentation;
+global using System.Text.RegularExpressions;
+global using A = DocumentFormat.OpenXml.Drawing;
+global using P = DocumentFormat.OpenXml.Presentation;
+global using DocuChef.Utils;
 global using DocuChef.Exceptions;
 global using DocuChef.Extensions;
 global using DocuChef.Logging;
-global using System.Collections;
-global using System.Text;

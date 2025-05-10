@@ -1,9 +1,4 @@
-﻿using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Presentation;
-using A = DocumentFormat.OpenXml.Drawing;
-using P = DocumentFormat.OpenXml.Presentation;
-
-namespace DocuChef.PowerPoint.Helpers;
+﻿namespace DocuChef.PowerPoint.Helpers;
 
 internal static class PowerPointHelper
 {

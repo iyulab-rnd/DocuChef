@@ -1,9 +1,4 @@
-﻿using DocumentFormat.OpenXml.Packaging;
-using System.Text.RegularExpressions;
-using A = DocumentFormat.OpenXml.Drawing;
-using P = DocumentFormat.OpenXml.Presentation;
-
-namespace DocuChef.PowerPoint.Helpers;
+﻿namespace DocuChef.PowerPoint.Helpers;
 
 /// <summary>
 /// Helper class for processing text in PowerPoint slides

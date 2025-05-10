@@ -1,13 +1,4 @@
-﻿using DocuChef.PowerPoint;
-using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Presentation;
-using System.Text;
-using System.Text.RegularExpressions;
-using A = DocumentFormat.OpenXml.Drawing;
-using P = DocumentFormat.OpenXml.Presentation;
-
-namespace DocuChef.Extensions;
+﻿namespace DocuChef.Extensions;
 
 /// <summary>
 /// Extension methods for working with OpenXml objects

@@ -2,9 +2,6 @@
 using DocuChef.PowerPoint.Helpers;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
-using System.Text;
-using System.Text.RegularExpressions;
-using A = DocumentFormat.OpenXml.Drawing;
 
 namespace DocuChef.PowerPoint;
 
@@ -123,108 +120,6 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
     }
 
     /// <summary>
-    /// Process a single slide
-    /// </summary>
-    private void ProcessSlide(PresentationPart presentationPart, SlideId slideId, int slideIndex)
-    {
-        Logger.Debug($"Processing slide {slideIndex} with ID {slideId.RelationshipId}");
-
-        // Update slide context
-        _context.Slide.Index = slideIndex;
-        _context.Slide.Id = slideId.RelationshipId;
-
-        // Get slide part
-        var slidePart = (SlidePart)presentationPart.GetPartById(slideId.RelationshipId);
-        if (slidePart == null || slidePart.Slide == null)
-        {
-            Logger.Warning($"Slide part not found for ID {slideId.RelationshipId}");
-            return;
-        }
-
-        // Store SlidePart in context
-        _context.SlidePart = slidePart;
-
-        // Get slide notes
-        string slideNotes = slidePart.GetNotes();
-        _context.Slide.Notes = slideNotes;
-
-        Logger.Debug($"Slide notes: {slideNotes}");
-
-        // Parse directives from slide notes using enhanced DirectiveParser
-        var directives = DirectiveParser.ParseDirectives(slideNotes);
-
-        // Process directives (e.g., #if)
-        foreach (var directive in directives)
-        {
-            Logger.Debug($"Processing directive: {directive.Name}");
-            ProcessShapeDirective(slidePart, directive);
-        }
-
-        // Analyze array references and handle automatic slide duplication
-        AnalyzeSlideForArrayIndices(presentationPart, slidePart, slideIndex);
-
-        // Process text replacements using DollarSignEngine
-        Logger.Debug($"Processing text replacements with DollarSignEngine on slide {slideIndex}");
-        ProcessTextReplacements(slidePart);
-
-        // Process special PowerPoint functions
-        ProcessPowerPointFunctionsInSlide(slidePart);
-
-        // Save slide after processing
-        try
-        {
-            slidePart.Slide.Save();
-            Logger.Debug($"Slide {slideIndex} saved after processing");
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"Error saving slide {slideIndex}: {ex.Message}", ex);
-        }
-    }
-
-    /// <summary>
-    /// Process PowerPoint functions in slide
-    /// </summary>
-    private void ProcessPowerPointFunctionsInSlide(SlidePart slidePart)
-    {
-        try
-        {
-            var shapes = slidePart.Slide.Descendants<Shape>().ToList();
-            Logger.Debug($"Processing PowerPoint functions in {shapes.Count} shapes");
-
-            bool hasChanges = false;
-
-            foreach (var shape in shapes)
-            {
-                // Update shape context
-                _context.Shape = new ShapeContext
-                {
-                    Name = shape.GetShapeName(),
-                    Id = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value.ToString(),
-                    Text = shape.GetText(),
-                    ShapeObject = shape
-                };
-
-                // Process PowerPoint functions
-                bool shapeChanged = ProcessPowerPointFunctions(shape);
-                if (shapeChanged)
-                    hasChanges = true;
-            }
-
-            // Save if any changes were made
-            if (hasChanges)
-            {
-                slidePart.Slide.Save();
-                Logger.Debug("Slide saved after processing PowerPoint functions");
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"Error processing PowerPoint functions: {ex.Message}", ex);
-        }
-    }
-
-    /// <summary>
     /// Prepare variables dictionary combining context variables and global variables
     /// </summary>
     internal Dictionary<string, object> PrepareVariables()
@@ -245,62 +140,4 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
 
         return variables;
     }
-
-    /// <summary>
-    /// Evaluate expression using DollarSignEngine
-    /// </summary>
-    internal object EvaluateCompleteExpression(string expression)
-    {
-        // Prepare variables dictionary
-        var variables = PrepareVariables();
-        return EvaluateCompleteExpression(expression, variables);
-    }
-
-    /// <summary>
-    /// Evaluate expression with provided variables
-    /// </summary>
-    public object EvaluateCompleteExpression(string expression, Dictionary<string, object> variables)
-    {
-        // Use DollarSignEngine adapter to evaluate
-        try
-        {
-            return _expressionEvaluator.Evaluate(expression, variables);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"Error evaluating expression '{expression}': {ex.Message}", ex);
-            return $"[Error: {ex.Message}]";
-        }
-    }
-
-    /// <summary>
-    /// Resolve variable value from context
-    /// </summary>
-    private object ResolveVariableValue(string name)
-    {
-        // Check direct variable
-        if (_context.Variables.TryGetValue(name, out var value))
-            return value;
-
-        // Check global variable
-        if (_context.GlobalVariables.TryGetValue(name, out var factory))
-            return factory();
-
-        // Check property path
-        if (name.Contains('.'))
-        {
-            var parts = name.Split('.');
-            if (_context.Variables.TryGetValue(parts[0], out var obj))
-            {
-                for (int i = 1; i < parts.Length && obj != null; i++)
-                {
-                    var property = obj.GetType().GetProperty(parts[i]);
-                    obj = property?.GetValue(obj);
-                }
-                return obj;
-            }
-        }
-
-        return null;
-    }
-}   
+}

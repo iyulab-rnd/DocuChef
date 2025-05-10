@@ -1,9 +1,4 @@
-﻿using System.Text;
-using System.Text.RegularExpressions;
-using P = DocumentFormat.OpenXml.Presentation;
-using A = DocumentFormat.OpenXml.Drawing;
-
-namespace DocuChef.PowerPoint.Helpers;
+﻿namespace DocuChef.PowerPoint.Helpers;
 
 /// <summary>
 /// Helper class for processing formatted text with expression evaluation and formatting preservation

@@ -1,8 +1,4 @@
-﻿using DocumentFormat.OpenXml.Packaging;
-using A = DocumentFormat.OpenXml.Drawing;
-using P = DocumentFormat.OpenXml.Presentation;
-
-namespace DocuChef.PowerPoint;
+﻿namespace DocuChef.PowerPoint;
 
 /// <summary>
 /// Partial class for PowerPointProcessor - Shape related methods
@@ -112,5 +108,84 @@ internal partial class PowerPointProcessor
         }
 
         return "Shape";
+    }
+
+    /// <summary>
+    /// Process PowerPoint functions like ${ppt.Image(...)}
+    /// </summary>
+    private bool ProcessPowerPointFunctions(P.Shape shape)
+    {
+        if (shape.TextBody == null)
+            return false;
+
+        // Look for PowerPoint functions in all text runs
+        bool hasChanges = false;
+        var variables = PrepareVariables();
+
+        foreach (var paragraph in shape.TextBody.Elements<A.Paragraph>().ToList())
+        {
+            foreach (var run in paragraph.Elements<A.Run>().ToList())
+            {
+                var textElement = run.GetFirstChild<A.Text>();
+                if (textElement == null || string.IsNullOrEmpty(textElement.Text))
+                    continue;
+
+                string text = textElement.Text;
+
+                // Check for ppt. functions
+                if (!text.Contains("${ppt."))
+                    continue;
+
+                // Extract function expressions
+                var matches = System.Text.RegularExpressions.Regex.Matches(text, @"\${ppt\.(\w+)\(([^)]*)\)}");
+                if (matches.Count == 0)
+                    continue;
+
+                // Process when the entire text is a function call
+                if (matches.Count == 1 && matches[0].Value == text)
+                {
+                    string functionName = matches[0].Groups[1].Value;
+                    string parametersString = matches[0].Groups[2].Value;
+
+                    Logger.Debug($"Processing PowerPoint function: {functionName}({parametersString})");
+
+                    // Find the function
+                    if (_context.Functions.TryGetValue(functionName, out var function))
+                    {
+                        // Update context for this shape
+                        _context.Shape.ShapeObject = shape;
+
+                        // Parse parameters
+                        var parameters = ParseFunctionParameters(parametersString);
+
+                        // Execute function
+                        var result = function.Execute(_context, null, parameters);
+
+                        // Handle result
+                        if (result is string resultText)
+                        {
+                            textElement.Text = resultText;
+                            hasChanges = true;
+                        }
+                    }
+                    else
+                    {
+                        Logger.Warning($"Function not found: {functionName}");
+                    }
+                }
+                else
+                {
+                    // Process mixed content with functions
+                    string processedText = ProcessExpressions(text);
+                    if (processedText != text)
+                    {
+                        textElement.Text = processedText;
+                        hasChanges = true;
+                    }
+                }
+            }
+        }
+
+        return hasChanges;
     }
 }

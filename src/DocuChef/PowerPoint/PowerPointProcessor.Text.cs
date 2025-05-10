@@ -1,9 +1,4 @@
 ﻿using DocuChef.PowerPoint.Helpers;
-using DocumentFormat.OpenXml.Packaging;
-using System.Text;
-using System.Text.RegularExpressions;
-using A = DocumentFormat.OpenXml.Drawing;
-using P = DocumentFormat.OpenXml.Presentation;
 
 namespace DocuChef.PowerPoint;
 
@@ -153,85 +148,6 @@ internal partial class PowerPointProcessor
     }
 
     /// <summary>
-    /// Process PowerPoint functions like ${ppt.Image(...)}
-    /// </summary>
-    private bool ProcessPowerPointFunctions(P.Shape shape)
-    {
-        if (shape.TextBody == null)
-            return false;
-
-        // Look for PowerPoint functions in all text runs
-        bool hasChanges = false;
-        var variables = PrepareVariables();
-
-        foreach (var paragraph in shape.TextBody.Elements<A.Paragraph>().ToList())
-        {
-            foreach (var run in paragraph.Elements<A.Run>().ToList())
-            {
-                var textElement = run.GetFirstChild<A.Text>();
-                if (textElement == null || string.IsNullOrEmpty(textElement.Text))
-                    continue;
-
-                string text = textElement.Text;
-
-                // Check for ppt. functions
-                if (!text.Contains("${ppt."))
-                    continue;
-
-                // Extract function expressions
-                var matches = Regex.Matches(text, @"\${ppt\.(\w+)\(([^)]*)\)}");
-                if (matches.Count == 0)
-                    continue;
-
-                // Process when the entire text is a function call
-                if (matches.Count == 1 && matches[0].Value == text)
-                {
-                    string functionName = matches[0].Groups[1].Value;
-                    string parametersString = matches[0].Groups[2].Value;
-
-                    Logger.Debug($"Processing PowerPoint function: {functionName}({parametersString})");
-
-                    // Find the function
-                    if (_context.Functions.TryGetValue(functionName, out var function))
-                    {
-                        // Update context for this shape
-                        _context.Shape.ShapeObject = shape;
-
-                        // Parse parameters
-                        var parameters = ParseFunctionParameters(parametersString);
-
-                        // Execute function
-                        var result = function.Execute(_context, null, parameters);
-
-                        // Handle result
-                        if (result is string resultText)
-                        {
-                            textElement.Text = resultText;
-                            hasChanges = true;
-                        }
-                    }
-                    else
-                    {
-                        Logger.Warning($"Function not found: {functionName}");
-                    }
-                }
-                else
-                {
-                    // Process mixed content with functions
-                    string processedText = ProcessExpressions(text);
-                    if (processedText != text)
-                    {
-                        textElement.Text = processedText;
-                        hasChanges = true;
-                    }
-                }
-            }
-        }
-
-        return hasChanges;
-    }
-
-    /// <summary>
     /// Parse function parameters
     /// </summary>
     private string[] ParseFunctionParameters(string parametersString)
@@ -277,5 +193,181 @@ internal partial class PowerPointProcessor
         }
 
         return results.ToArray();
+    }
+
+    /// <summary>
+    /// Replace array references like ${Items[0].Name} in text
+    /// </summary>
+    private string ReplaceArrayReferences(string text, Dictionary<string, object> variables)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        // Pattern for ${array[index].property} with optional formatting
+        var pattern = @"\$\{(\w+)\[(\d+)\](\.[\w]+)?(:[^}]+)?\}";
+
+        return Regex.Replace(text, pattern, match => {
+            try
+            {
+                string arrayName = match.Groups[1].Value;
+                int index = int.Parse(match.Groups[2].Value);
+                string propPath = match.Groups[3].Success ? match.Groups[3].Value.Substring(1) : null; // Remove the dot
+                string format = match.Groups[4].Success ? match.Groups[4].Value : null;
+
+                // Build the variable key
+                string variableKey = propPath != null ?
+                    $"{arrayName}[{index}].{propPath}" :
+                    $"{arrayName}[{index}]";
+
+                // Look up in variables
+                if (variables.TryGetValue(variableKey, out var value))
+                {
+                    if (value == null)
+                        return "";
+
+                    // Apply formatting if specified
+                    if (!string.IsNullOrEmpty(format) && format.StartsWith(":") && value is IFormattable formattable)
+                    {
+                        return formattable.ToString(format.Substring(1), System.Globalization.CultureInfo.CurrentCulture);
+                    }
+
+                    return value.ToString();
+                }
+
+                return match.Value; // Keep original if not found
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Error replacing array reference: {ex.Message}");
+                return match.Value;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Replace normal variables like ${Variable} in text
+    /// </summary>
+    private string ReplaceNormalVariables(string text, Dictionary<string, object> variables)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        // Pattern for ${variable}
+        var pattern = @"\$\{([^{}\[\]\.]+)(:[^}]+)?\}";
+
+        return Regex.Replace(text, pattern, match => {
+            try
+            {
+                string variableName = match.Groups[1].Value.Trim();
+                string format = match.Groups[2].Success ? match.Groups[2].Value : null;
+
+                // Look up in variables
+                if (variables.TryGetValue(variableName, out var value))
+                {
+                    if (value == null)
+                        return "";
+
+                    // Apply formatting if specified
+                    if (!string.IsNullOrEmpty(format) && format.StartsWith(":") && value is IFormattable formattable)
+                    {
+                        return formattable.ToString(format.Substring(1), System.Globalization.CultureInfo.CurrentCulture);
+                    }
+
+                    return value.ToString();
+                }
+
+                return match.Value; // Keep original if not found
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Error replacing variable: {ex.Message}");
+                return match.Value;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Force text replacement on all shapes in a slide, directly manipulating XML if needed
+    /// </summary>
+    private void ForceTextReplacementOnSlide(SlidePart slidePart, Dictionary<string, object> variables)
+    {
+        Logger.Debug("Applying forced text replacement on slide");
+
+        var shapes = slidePart.Slide.Descendants<P.Shape>().ToList();
+
+        // Try multiple strategies to ensure text is replaced
+        foreach (var shape in shapes)
+        {
+            string shapeName = shape.GetShapeName();
+
+            if (shape.TextBody == null)
+                continue;
+
+            try
+            {
+                // Strategy 1: Direct XML-based replacement for array items
+                var paragraphs = shape.TextBody.Elements<A.Paragraph>().ToList();
+                bool directReplacement = false;
+
+                foreach (var paragraph in paragraphs)
+                {
+                    var textElements = paragraph.Descendants<A.Text>().ToList();
+
+                    // Look for array references in each text element
+                    foreach (var textElement in textElements)
+                    {
+                        if (textElement.Text == null)
+                            continue;
+
+                        string originalText = textElement.Text;
+
+                        // Replace array references ${Items[n].Property}
+                        string modifiedText = ReplaceArrayReferences(originalText, variables);
+
+                        // Replace normal expressions ${Variable}
+                        modifiedText = ReplaceNormalVariables(modifiedText, variables);
+
+                        if (modifiedText != originalText)
+                        {
+                            textElement.Text = modifiedText;
+                            directReplacement = true;
+                            Logger.Debug($"Force-updated text in shape {shapeName}: '{originalText}' -> '{modifiedText}'");
+                        }
+                    }
+                }
+
+                // Strategy 2: Combined text replacement if needed
+                if (!directReplacement)
+                {
+                    string completeText = shape.GetText();
+                    if (!string.IsNullOrEmpty(completeText))
+                    {
+                        string replacedText = ReplaceArrayReferences(completeText, variables);
+                        replacedText = ReplaceNormalVariables(replacedText, variables);
+
+                        if (replacedText != completeText)
+                        {
+                            shape.SetText(replacedText);
+                            Logger.Debug($"Applied full text replacement in shape {shapeName}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"Error during forced text replacement in shape {shapeName}: {ex.Message}");
+            }
+        }
+
+        // Save the slide with changes
+        try
+        {
+            slidePart.Slide.Save();
+            Logger.Debug("Saved slide after forced text replacement");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"Error saving slide after forced text replacement: {ex.Message}");
+        }
     }
 }

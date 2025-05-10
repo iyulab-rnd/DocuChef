@@ -8,17 +8,17 @@ public class PowerPointFunction
     /// <summary>
     /// Function name
     /// </summary>
-    public string Name { get; set; }
+    public required string Name { get; set; }
 
     /// <summary>
     /// Function handler
     /// </summary>
-    public Func<PowerPointContext, object, string[], object> Handler { get; set; }
+    public required Func<PowerPointContext, object?, string[]?, object?> Handler { get; set; }
 
     /// <summary>
     /// Function description
     /// </summary>
-    public string Description { get; set; }
+    public string Description { get; set; } = string.Empty;
 
     /// <summary>
     /// Creates a new PowerPoint function
@@ -28,7 +28,7 @@ public class PowerPointFunction
     /// <summary>
     /// Creates a new PowerPoint function with the specified properties
     /// </summary>
-    public PowerPointFunction(string name, string description, Func<PowerPointContext, object, string[], object> handler)
+    public PowerPointFunction(string name, string description, Func<PowerPointContext, object?, string[]?, object?> handler)
     {
         Name = name;
         Description = description;
@@ -38,7 +38,7 @@ public class PowerPointFunction
     /// <summary>
     /// Execute the function
     /// </summary>
-    public object Execute(PowerPointContext context, object value, string[] parameters)
+    public object? Execute(PowerPointContext context, object? value, string[]? parameters)
     {
         if (Handler == null)
         {

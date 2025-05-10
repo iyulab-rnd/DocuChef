@@ -1,11 +1,11 @@
 ﻿using DocuChef.PowerPoint.Helpers;
 
-namespace DocuChef.Extensions;
+namespace DocuChef.PowerPoint;
 
 /// <summary>
 /// Extension methods for working with OpenXml objects
 /// </summary>
-public static class OpenXmlExtensions
+public static class PresentationElementExtensions
 {
     /// <summary>
     /// Gets the name of a PowerPoint shape
@@ -47,7 +47,7 @@ public static class OpenXmlExtensions
     /// <summary>
     /// Clears text content from a PowerPoint shape
     /// </summary>
-    public static void ClearText(this P.Shape shape)
+    public static void ClearText(this Shape shape)
     {
         if (shape?.TextBody == null)
             return;
@@ -71,7 +71,7 @@ public static class OpenXmlExtensions
     /// <summary>
     /// Sets visibility of a PowerPoint shape
     /// </summary>
-    public static void SetVisibility(this P.Shape shape, bool visible)
+    public static void SetVisibility(this Shape shape, bool visible)
     {
         if (visible)
             PowerPointShapeHelper.ShowShape(shape);

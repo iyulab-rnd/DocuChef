@@ -1,13 +1,13 @@
 ﻿/*
 template_2.pptx 설명
 # 첫번째 슬라이드:
-- 상단 중앙 도형1: ${ppt.Image("LogoPath")}
+- 상단 중앙 도형1: ${ppt.Image(LogoPath)}
 - 제목 1: ${Title}
 - 부제목 2: hello ${Subtitle} world
   - 서식유지 필요 <bold>hello</bold><fontsize:16>${Subtitle}</fontsize><italic>world</italic>
 - TextBox 3: Created By: ${Date:yyyy-MM-dd}
 # 두번째 슬라이드:
-- 좌상단 직사각형1: ${ppt.Image("LogoPath")}
+- 좌상단 직사각형1: ${ppt.Image(LogoPath)}
 - 우상단 직사각형5: ${CompanyName}
 - 목록 직사각형1:
 ${Items[0].Id}. ${Items[0].Name} - ${Items[0].Description}
@@ -35,7 +35,7 @@ Console.WriteLine("=======================================================");
 
 // 파일 경로 설정
 string basePath = AppDomain.CurrentDomain.BaseDirectory;
-string templatePath = Path.Combine(basePath, "files", "ppt", "template_2.pptx");
+string templatePath = Path.Combine(basePath, "files", "ppt", "template_3.pptx");
 string logoPath = Path.Combine(basePath, "files", "logo.png");
 string outputPath = Path.Combine(basePath, "output_multi_slides.pptx");
 
@@ -83,14 +83,16 @@ try
 
     // Items 배열 생성
     var items = new List<Item>();
-    for (int i = 1; i <= 13; i++)
+    for (int i = 1; i <= 3; i++)
     {
         items.Add(new Item
         {
             Id = i,
             Name = $"상품 {i}",
             Description = $"상품 {i}에 대한 설명입니다.",
-            Price = 10000 * i
+            Price = 10000 * i,
+            //ImageUrl = logoPath
+            ImageUrl = $"https://placehold.co/60x60?text=Item{i}"
         });
     }
 
@@ -131,4 +133,5 @@ public class Item
     public string Name { get; set; }
     public string Description { get; set; }
     public decimal Price { get; set; }
+    public string ImageUrl { get; set; }
 }

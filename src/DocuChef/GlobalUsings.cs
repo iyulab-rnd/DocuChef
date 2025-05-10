@@ -7,6 +7,7 @@ global using System.Text.RegularExpressions;
 global using A = DocumentFormat.OpenXml.Drawing;
 global using P = DocumentFormat.OpenXml.Presentation;
 global using DocuChef.Utils;
+global using DocuChef.Helpers;
 global using DocuChef.Exceptions;
 global using DocuChef.Extensions;
 global using DocuChef.Logging;

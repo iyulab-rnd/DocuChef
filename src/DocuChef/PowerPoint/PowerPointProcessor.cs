@@ -1,7 +1,5 @@
 ﻿using DocuChef.PowerPoint.DollarSignEngine;
 using DocuChef.PowerPoint.Helpers;
-using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Presentation;
 
 namespace DocuChef.PowerPoint;
 
@@ -24,6 +22,7 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
         _document = document ?? throw new ArgumentNullException(nameof(document));
         _options = options ?? throw new ArgumentNullException(nameof(options));
 
+        // Initialize context with options
         _context = new PowerPointContext
         {
             Options = options
@@ -75,28 +74,37 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
                 throw new DocuChefException("Invalid PowerPoint document: SlideIdList is missing");
             }
 
-            // Process each slide
+            // First pass: Analyze and duplicate slides
             var slideIds = slideIdList.ChildElements.OfType<SlideId>().ToList();
+            Logger.Info($"Analyzing {slideIds.Count} slides for array references");
+
+            // Create a list to track slides that need duplication
+            var slidesToDuplicate = new List<(SlidePart SlidePart, int SlideIndex)>();
+
+            for (int i = 0; i < slideIds.Count; i++)
+            {
+                var relationshipId = slideIds[i].RelationshipId;
+                var slidePart = (SlidePart)presentationPart.GetPartById(relationshipId);
+
+                if (slidePart != null)
+                {
+                    slidesToDuplicate.Add((slidePart, i));
+                }
+            }
+
+            // Analyze and duplicate slides as needed
+            foreach (var (slidePart, slideIndex) in slidesToDuplicate)
+            {
+                AnalyzeSlideForArrayIndices(presentationPart, slidePart, slideIndex);
+            }
+
+            // Second pass: Process all slides including duplicated ones
+            slideIds = slideIdList.ChildElements.OfType<SlideId>().ToList();
             Logger.Info($"Processing {slideIds.Count} slides");
 
             for (int i = 0; i < slideIds.Count; i++)
             {
                 ProcessSlide(presentationPart, slideIds[i], i);
-
-                // Ensure all changes to this slide are saved
-                try
-                {
-                    var slidePart = (SlidePart)presentationPart.GetPartById(slideIds[i].RelationshipId);
-                    if (slidePart != null && slidePart.Slide != null)
-                    {
-                        slidePart.Slide.Save();
-                        Logger.Debug($"Slide {i} saved after processing");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error($"Error saving slide {i}: {ex.Message}", ex);
-                }
             }
 
             // Save presentation after processing all slides

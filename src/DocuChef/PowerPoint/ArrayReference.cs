@@ -24,4 +24,19 @@ internal class ArrayReference
     /// The full pattern matched in the text
     /// </summary>
     public string Pattern { get; set; }
+
+    /// <summary>
+    /// The ID of the shape containing this reference (if available)
+    /// </summary>
+    public uint? ShapeId { get; set; }
+
+    /// <summary>
+    /// The name of the shape containing this reference
+    /// </summary>
+    public string ShapeName { get; set; }
+
+    /// <summary>
+    /// Whether this reference is in an image function
+    /// </summary>
+    public bool IsInImageFunction { get; set; }
 }

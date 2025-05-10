@@ -1,7 +1,4 @@
-﻿using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Presentation;
-
-namespace DocuChef.PowerPoint;
+﻿namespace DocuChef.PowerPoint;
 
 /// <summary>
 /// Context for PowerPoint template processing
@@ -47,6 +44,11 @@ public class PowerPointContext
     /// Current SlidePart being processed
     /// </summary>
     public SlidePart SlidePart { get; set; }
+
+    /// <summary>
+    /// Tracks slides that have been processed with array batch data
+    /// </summary>
+    public HashSet<string> ProcessedArraySlides { get; } = new HashSet<string>();
 
     /// <summary>
     /// Creates a new PowerPointContext with default values

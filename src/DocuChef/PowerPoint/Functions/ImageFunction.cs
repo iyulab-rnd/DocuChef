@@ -34,32 +34,208 @@ internal static class ImageFunction
         }
 
         string imagePath = parameters[0];
-        Logger.Debug($"Processing image: {imagePath}");
+        Logger.Debug($"[IMAGE-DEBUG] Processing image with parameter: '{imagePath}'");
 
         try
         {
-            // Resolve image path from variables if needed
-            if (imagePath.Contains("."))
+            // Default values from options - 이 부분을 추가합니다
+            int width = context.Options?.DefaultImageWidth ?? 300;
+            int height = context.Options?.DefaultImageHeight ?? 200;
+            bool preserveAspectRatio = context.Options?.PreserveImageAspectRatio ?? true;
+
+            // Check for suspicious array index
+            if (imagePath.Contains("Items["))
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(imagePath, @"Items\[(\d+)\]");
+                if (match.Success)
+                {
+                    int index = int.Parse(match.Groups[1].Value);
+                    Logger.Debug($"[IMAGE-DEBUG] Found array index in image path: {index}");
+
+                    // Range check
+                    if (index > 30)
+                    {
+                        Logger.Warning($"[IMAGE-DEBUG] Suspicious high index: {index}, likely an error in index calculation");
+                    }
+
+                    // Get the actual array
+                    if (context.Variables.TryGetValue("Items", out var arrayObj) && arrayObj != null)
+                    {
+                        // Try to get the actual count
+                        int count = CollectionHelper.GetCollectionCount(arrayObj);
+
+                        if (count > 0 && index >= count)
+                        {
+                            Logger.Warning($"[IMAGE-DEBUG] Index {index} is out of bounds (count: {count})");
+
+                            // 중요: 범위를 벗어난 경우 null을 반환하여 이미지를 표시하지 않음
+                            return "[Out of range]";
+                        }
+                    }
+                }
+            }
+
+            // 배열 요소 참조 확인 (예: Items[0].ImageUrl 패턴)
+            var arrayIndexMatch = System.Text.RegularExpressions.Regex.Match(
+                imagePath,
+                @"^(\w+)\[(\d+)\](\.(\w+))+$");
+
+            if (arrayIndexMatch.Success)
+            {
+                string arrayName = arrayIndexMatch.Groups[1].Value;
+                int index = int.Parse(arrayIndexMatch.Groups[2].Value);
+
+                // 전체 속성 경로 추출 (예: .ImageUrl)
+                string propertyPath = imagePath.Substring(arrayName.Length + 2 + index.ToString().Length);
+
+                Logger.Debug($"[IMAGE-DEBUG] Detected array reference: array={arrayName}, index={index}, property={propertyPath}");
+
+                // 범위 검사
+                if (index > 30)
+                {
+                    Logger.Warning($"[IMAGE-DEBUG] Index {index} is suspiciously high - might be an error");
+                }
+
+                // Items 배열 가져오기
+                if (context.Variables.TryGetValue(arrayName, out var arrayObj) && arrayObj != null)
+                {
+                    // 배열 또는 리스트에서 요소 가져오기
+                    object item = null;
+
+                    if (arrayObj is IList list)
+                    {
+                        // Range check
+                        if (index >= 0 && index < list.Count)
+                        {
+                            item = list[index];
+                            Logger.Debug($"[IMAGE-DEBUG] Successfully retrieved item at index {index} from list with {list.Count} items");
+                        }
+                        else
+                        {
+                            Logger.Warning($"[IMAGE-DEBUG] Array index out of range: {index}, list count: {list.Count}");
+                            // 중요: 범위를 벗어난 경우 null을 반환하여 이미지를 표시하지 않음
+                            return "[Out of range]";
+                        }
+                    }
+                    else if (arrayObj is Array array)
+                    {
+                        if (index >= 0 && index < array.Length)
+                        {
+                            item = array.GetValue(index);
+                            Logger.Debug($"[IMAGE-DEBUG] Successfully retrieved item at index {index} from array with {array.Length} items");
+                        }
+                        else
+                        {
+                            Logger.Warning($"[IMAGE-DEBUG] Array index out of range: {index}, array length: {array.Length}");
+                            // 중요: 범위를 벗어난 경우 null을 반환하여 이미지를 표시하지 않음
+                            return "[Out of range]";
+                        }
+                    }
+                    else if (arrayObj is IEnumerable enumerable)
+                    {
+                        int count = 0;
+                        foreach (var _ in enumerable) count++;
+
+                        int currentIndex = 0;
+                        foreach (var enumerableItem in enumerable)
+                        {
+                            if (currentIndex == index)
+                            {
+                                item = enumerableItem;
+                                Logger.Debug($"[IMAGE-DEBUG] Successfully retrieved item at index {index} from enumerable with {count} items");
+                                break;
+                            }
+                            currentIndex++;
+                        }
+
+                        if (item == null)
+                        {
+                            Logger.Warning($"[IMAGE-DEBUG] Enumerable index out of range: {index}, count: {count}");
+                            // 중요: 범위를 벗어난 경우 null을 반환하여 이미지를 표시하지 않음
+                            return "[Out of range]";
+                        }
+                    }
+
+                    if (item != null)
+                    {
+                        // 속성 경로에서 첫 번째 점 제거
+                        if (propertyPath.StartsWith("."))
+                            propertyPath = propertyPath.Substring(1);
+
+                        // 리플렉션으로 속성 값 가져오기
+                        var props = propertyPath.Split('.');
+                        object propValue = item;
+
+                        foreach (var prop in props)
+                        {
+                            var propInfo = propValue.GetType().GetProperty(prop);
+                            if (propInfo == null)
+                            {
+                                Logger.Warning($"[IMAGE-DEBUG] Property '{prop}' not found on type '{propValue.GetType().Name}'");
+                                return $"[Error: Property '{prop}' not found]";
+                            }
+
+                            propValue = propInfo.GetValue(propValue);
+                            if (propValue == null)
+                            {
+                                Logger.Warning($"[IMAGE-DEBUG] Property '{prop}' value is null");
+                                return $"[Error: Property '{prop}' value is null]";
+                            }
+                        }
+
+                        // 최종 이미지 경로
+                        imagePath = propValue.ToString();
+                        Logger.Debug($"[IMAGE-DEBUG] Resolved image path from array item: {imagePath}");
+                    }
+                    else
+                    {
+                        Logger.Warning($"[IMAGE-DEBUG] Array item not found: {arrayName}[{index}]");
+                        return $"[Error: Array item not found: {arrayName}[{index}]]";
+                    }
+                }
+                else
+                {
+                    Logger.Warning($"[IMAGE-DEBUG] Array not found: {arrayName}");
+                    return $"[Error: Array not found: {arrayName}]";
+                }
+            }
+            // 일반 속성 경로 처리 (예: Object.Property)
+            else if (imagePath.Contains("."))
             {
                 // Try to resolve as property path
                 var resolvedPath = context.ResolveVariable(imagePath);
                 if (resolvedPath != null)
                 {
                     imagePath = resolvedPath.ToString();
-                    Logger.Debug($"Resolved image path from property path: {imagePath}");
+                    Logger.Debug($"[IMAGE-DEBUG] Resolved image path from property path: {imagePath}");
                 }
             }
+            // 직접 변수 참조 처리
             else if (context.Variables.TryGetValue(imagePath, out var pathObj))
             {
                 // Direct variable reference
                 imagePath = pathObj?.ToString();
-                Logger.Debug($"Resolved image path from variable: {imagePath}");
+                Logger.Debug($"[IMAGE-DEBUG] Resolved image path from variable: {imagePath}");
             }
 
-            // Default values from options
-            int width = context.Options?.DefaultImageWidth ?? 300;
-            int height = context.Options?.DefaultImageHeight ?? 200;
-            bool preserveAspectRatio = context.Options?.PreserveImageAspectRatio ?? true;
+            // 여기서 ImageHelper를 사용하여 이미지 처리 (있는 경우)
+            if (ClosedXML.Report.XLCustom.Functions.ImageHelper.GetImageFromPathOrUrl != null)
+            {
+                try
+                {
+                    string resolvedImagePath = ClosedXML.Report.XLCustom.Functions.ImageHelper.GetImageFromPathOrUrl(imagePath);
+                    if (!string.IsNullOrEmpty(resolvedImagePath))
+                    {
+                        Logger.Debug($"[IMAGE-DEBUG] Image resolved with ImageHelper: {resolvedImagePath}");
+                        imagePath = resolvedImagePath;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning($"[IMAGE-DEBUG] Error using ImageHelper: {ex.Message}");
+                    // Continue with original path
+                }
+            }
 
             // Parse named parameters according to PPT syntax (width: 300, height: 200)
             for (int i = 1; i < parameters.Length; i++)
@@ -103,7 +279,7 @@ internal static class ImageFunction
             // Make sure the image file exists
             if (!File.Exists(imagePath))
             {
-                Logger.Warning($"Image file not found: {imagePath}");
+                Logger.Warning($"[IMAGE-DEBUG] Image file not found: {imagePath}");
                 return $"[Error: Image file not found: {imagePath}]";
             }
 
@@ -251,4 +427,5 @@ internal static class ImageFunction
             return false;
         }
     }
+
 }

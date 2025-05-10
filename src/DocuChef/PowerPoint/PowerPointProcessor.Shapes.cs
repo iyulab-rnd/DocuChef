@@ -133,21 +133,47 @@ internal partial class PowerPointProcessor
                 string text = textElement.Text;
 
                 // Check for ppt. functions
-                if (!text.Contains("${ppt."))
+                if (!text.Contains("${ppt.") && !text.Contains("ppt."))
                     continue;
+
+                // Debug log
+                Logger.Debug($"[FUNCTION-DEBUG] Processing PowerPoint function in text: {text}");
 
                 // Extract function expressions
                 var matches = System.Text.RegularExpressions.Regex.Matches(text, @"\${ppt\.(\w+)\(([^)]*)\)}");
                 if (matches.Count == 0)
+                {
+                    // Try alternate pattern without ${...}
+                    matches = System.Text.RegularExpressions.Regex.Matches(text, @"ppt\.(\w+)\(([^)]*)\)");
+                }
+
+                if (matches.Count == 0)
                     continue;
 
+                // Debug log - what function matches were found
+                foreach (Match m in matches)
+                {
+                    Logger.Debug($"[FUNCTION-DEBUG] Found function match: {m.Value}, function: {m.Groups[1].Value}, params: {m.Groups[2].Value}");
+                }
+
                 // Process when the entire text is a function call
-                if (matches.Count == 1 && matches[0].Value == text)
+                if (matches.Count == 1 && (matches[0].Value == text || matches[0].Value.Trim() == text.Trim()))
                 {
                     string functionName = matches[0].Groups[1].Value;
                     string parametersString = matches[0].Groups[2].Value;
 
-                    Logger.Debug($"Processing PowerPoint function: {functionName}({parametersString})");
+                    Logger.Debug($"[FUNCTION-DEBUG] Processing PowerPoint function: {functionName}({parametersString})");
+
+                    // Check for Items[] pattern in parameters
+                    if (parametersString.Contains("Items["))
+                    {
+                        var indexMatch = System.Text.RegularExpressions.Regex.Match(parametersString, @"Items\[(\d+)\]");
+                        if (indexMatch.Success)
+                        {
+                            int index = int.Parse(indexMatch.Groups[1].Value);
+                            Logger.Debug($"[FUNCTION-DEBUG] Function has array index: {index}");
+                        }
+                    }
 
                     // Find the function
                     if (_context.Functions.TryGetValue(functionName, out var function))
@@ -157,6 +183,13 @@ internal partial class PowerPointProcessor
 
                         // Parse parameters
                         var parameters = ParseFunctionParameters(parametersString);
+
+                        // Debug log parameters
+                        Logger.Debug($"[FUNCTION-DEBUG] Parsed {parameters.Length} parameters:");
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            Logger.Debug($"[FUNCTION-DEBUG]   Parameter {i}: '{parameters[i]}'");
+                        }
 
                         // Execute function
                         var result = function.Execute(_context, null, parameters);
@@ -170,7 +203,7 @@ internal partial class PowerPointProcessor
                     }
                     else
                     {
-                        Logger.Warning($"Function not found: {functionName}");
+                        Logger.Warning($"[FUNCTION-DEBUG] Function not found: {functionName}");
                     }
                 }
                 else

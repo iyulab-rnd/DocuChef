@@ -29,16 +29,39 @@ internal class FormattedTextProcessor
 
         bool hasChanges = false;
 
-        // Check if any run in the shape contains partial expressions
-        bool containsPartialExpressions = ContainsPartialExpressions(shape);
-        if (!containsPartialExpressions)
+        // Check for expression pattern in shape first
+        bool hasExpressions = false;
+        foreach (var para in shape.TextBody.Elements<A.Paragraph>())
         {
-            // No partial expressions, process each run individually
-            return ProcessRunsIndividually(shape);
+            foreach (var run in para.Elements<A.Run>())
+            {
+                var textElement = run.GetFirstChild<A.Text>();
+                if (textElement != null && !string.IsNullOrEmpty(textElement.Text) &&
+                    textElement.Text.Contains("${"))
+                {
+                    hasExpressions = true;
+                    break;
+                }
+            }
+            if (hasExpressions) break;
         }
 
-        // If we have partial expressions, handle special cases for "item[n].Property" patterns
-        return ProcessArrayExpressions(shape);
+        if (!hasExpressions)
+            return false;
+
+        // Check if expressions span across multiple runs
+        bool containsPartialExpressions = ContainsPartialExpressions(shape);
+
+        if (containsPartialExpressions)
+        {
+            // Handle expressions that span across runs
+            return ProcessCrossRunExpressions(shape);
+        }
+        else
+        {
+            // Process each run individually (simpler case)
+            return ProcessRunsIndividually(shape);
+        }
     }
 
     /// <summary>
@@ -75,105 +98,122 @@ internal class FormattedTextProcessor
     }
 
     /// <summary>
-    /// Process array expressions that may be split across multiple runs
+    /// Process expressions that span across multiple runs
     /// </summary>
-    private bool ProcessArrayExpressions(P.Shape shape)
+    private bool ProcessCrossRunExpressions(P.Shape shape)
     {
         bool hasChanges = false;
 
+        // Process paragraph by paragraph
         foreach (var paragraph in shape.TextBody.Elements<A.Paragraph>().ToList())
         {
-            // Pattern to detect item[n].Property expressions
-            var itemPattern = new Regex(@"\$\{(item|items)(\[\d+\])(\.(\w+))?", RegexOptions.IgnoreCase);
-            var runs = paragraph.Elements<A.Run>().ToList();
+            // Build complete paragraph text and map runs to positions
+            StringBuilder paragraphText = new StringBuilder();
+            List<(A.Run Run, int StartPos, int Length)> runMappings = new List<(A.Run, int, int)>();
 
-            // Skip if no runs
-            if (runs.Count == 0)
+            foreach (var run in paragraph.Elements<A.Run>().ToList())
+            {
+                var textElement = run.GetFirstChild<A.Text>();
+                if (textElement != null && !string.IsNullOrEmpty(textElement.Text))
+                {
+                    int startPos = paragraphText.Length;
+                    string text = textElement.Text;
+                    paragraphText.Append(text);
+                    runMappings.Add((run, startPos, text.Length));
+                }
+            }
+
+            // Check if paragraph contains expressions
+            string paraText = paragraphText.ToString();
+            if (!paraText.Contains("${"))
                 continue;
 
-            // For each run, check if it contains the start of an array expression
-            for (int i = 0; i < runs.Count; i++)
+            // Process expressions in complete paragraph text
+            string processedText = ProcessExpressions(paraText);
+            if (processedText == paraText)
+                continue;
+
+            // Map processed text back to runs
+            if (MapProcessedTextToRuns(paragraph, runMappings, processedText))
+                hasChanges = true;
+        }
+
+        return hasChanges;
+    }
+
+    /// <summary>
+    /// Map processed text back to runs, preserving formatting
+    /// </summary>
+    private bool MapProcessedTextToRuns(A.Paragraph paragraph, List<(A.Run Run, int StartPos, int Length)> runMappings, string processedText)
+    {
+        if (runMappings.Count == 0)
+            return false;
+
+        // Simple case: If we have just one run, replace its text directly
+        if (runMappings.Count == 1)
+        {
+            var textElement = runMappings[0].Run.GetFirstChild<A.Text>();
+            if (textElement != null)
             {
-                var run = runs[i];
-                var textElement = run.GetFirstChild<A.Text>();
-                if (textElement == null || string.IsNullOrEmpty(textElement.Text))
-                    continue;
+                textElement.Text = processedText;
+                return true;
+            }
+            return false;
+        }
 
-                string text = textElement.Text;
+        // Complex case: Try to map text back to runs based on relative positions
+        // This is an approximate approach that works for simple cases
 
-                // Check if this run has a partial array expression
-                var match = itemPattern.Match(text);
-                if (!match.Success)
+        // First, clear all existing runs
+        foreach (var runInfo in runMappings)
+        {
+            runInfo.Run.RemoveAllChildren<A.Text>();
+        }
+
+        // Determine how to distribute the processed text
+        double ratio = (double)processedText.Length / runMappings.Sum(r => r.Length);
+
+        int remainingText = processedText.Length;
+        int currentPos = 0;
+
+        for (int i = 0; i < runMappings.Count; i++)
+        {
+            var runInfo = runMappings[i];
+
+            // Last run gets all remaining text
+            if (i == runMappings.Count - 1)
+            {
+                if (currentPos < processedText.Length)
                 {
-                    // If it has a complete expression, process it normally
-                    if (text.Contains("${") && text.Contains("}"))
-                    {
-                        string processed = ProcessExpressions(text);
-                        if (processed != text)
-                        {
-                            textElement.Text = processed;
-                            hasChanges = true;
-                        }
-                    }
-                    continue;
+                    string runText = processedText.Substring(currentPos);
+                    runInfo.Run.AppendChild(new A.Text(runText));
                 }
-
-                // Found start of array expression, collect all text parts
-                string arrayName = match.Groups[1].Value;
-                bool foundComplete = false;
-                StringBuilder completePart = new StringBuilder(text);
-
-                // Check next runs to build complete expression
-                for (int j = i + 1; j < runs.Count && !foundComplete; j++)
+                else
                 {
-                    var nextRun = runs[j];
-                    var nextText = nextRun.GetFirstChild<A.Text>()?.Text;
-                    if (string.IsNullOrEmpty(nextText))
-                        continue;
+                    runInfo.Run.AppendChild(new A.Text(string.Empty));
+                }
+            }
+            else
+            {
+                // Allocate text proportionally to original length
+                int newLength = (int)Math.Ceiling(runInfo.Length * ratio);
+                newLength = Math.Min(newLength, remainingText);
 
-                    completePart.Append(nextText);
-                    string combined = completePart.ToString();
-
-                    // Check if we have a complete expression now
-                    int openBrace = combined.IndexOf("${");
-                    int closeBrace = combined.IndexOf("}", openBrace);
-
-                    if (closeBrace > openBrace)
-                    {
-                        foundComplete = true;
-                        string completeExpr = combined.Substring(openBrace, closeBrace - openBrace + 1);
-
-                        // Process the complete expression
-                        string processed = ProcessExpressions(completeExpr);
-                        if (processed != completeExpr)
-                        {
-                            // Replace in first run
-                            textElement.Text = text.Replace(match.Value, processed);
-                            hasChanges = true;
-
-                            // Remove expression parts from other runs
-                            for (int k = i + 1; k <= j; k++)
-                            {
-                                var runToModify = runs[k];
-                                var textToModify = runToModify.GetFirstChild<A.Text>();
-                                if (textToModify != null)
-                                {
-                                    string runText = textToModify.Text;
-                                    int endPos = k == j ? runText.IndexOf("}") + 1 : runText.Length;
-                                    if (endPos > 0)
-                                    {
-                                        textToModify.Text = runText.Substring(endPos);
-                                    }
-                                }
-                            }
-                        }
-                        break;
-                    }
+                if (newLength > 0 && currentPos < processedText.Length)
+                {
+                    string runText = processedText.Substring(currentPos, Math.Min(newLength, processedText.Length - currentPos));
+                    runInfo.Run.AppendChild(new A.Text(runText));
+                    currentPos += runText.Length;
+                    remainingText -= runText.Length;
+                }
+                else
+                {
+                    runInfo.Run.AppendChild(new A.Text(string.Empty));
                 }
             }
         }
 
-        return hasChanges;
+        return true;
     }
 
     /// <summary>
@@ -233,28 +273,31 @@ internal class FormattedTextProcessor
         if (string.IsNullOrEmpty(text) || !text.Contains("${"))
             return text;
 
-        // Check for simple item[n].property replacements
-        var itemPattern = new Regex(@"\$\{(item|items)(\[\d+\])(\.(\w+))?(:[^}]+)?\}", RegexOptions.IgnoreCase);
-        var matches = itemPattern.Matches(text);
+        // Check for array references first (special handling for Items[n].Property patterns)
+        var arrayPattern = new Regex(@"\$\{(item|items)(\[\d+\])(\.(\w+))?(:[^}]+)?\}", RegexOptions.IgnoreCase);
+        var matches = arrayPattern.Matches(text);
 
-        foreach (Match match in matches)
+        if (matches.Count > 0)
         {
-            string fullMatch = match.Value;
-            try
+            foreach (Match match in matches)
             {
-                // Normalize to Items for consistency
-                string normalizedExpr = fullMatch.Replace(match.Groups[1].Value, "Items");
-
-                // Evaluate the expression
-                var result = _processor.EvaluateCompleteExpression(normalizedExpr, _variables);
-                if (result != null)
+                string fullMatch = match.Value;
+                try
                 {
-                    text = text.Replace(fullMatch, result.ToString());
+                    // Normalize array name to 'Items'
+                    string normalizedExpr = fullMatch.Replace(match.Groups[1].Value, "Items");
+
+                    // Evaluate the expression
+                    var result = _processor.EvaluateCompleteExpression(normalizedExpr, _variables);
+                    if (result != null)
+                    {
+                        text = text.Replace(fullMatch, result.ToString());
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning($"Error evaluating expression '{fullMatch}': {ex.Message}");
+                catch (Exception ex)
+                {
+                    Logger.Warning($"Error evaluating array expression '{fullMatch}': {ex.Message}");
+                }
             }
         }
 

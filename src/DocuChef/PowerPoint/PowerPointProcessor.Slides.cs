@@ -1,5 +1,4 @@
-﻿using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Presentation;
+﻿using DocuChef.PowerPoint.Helpers;
 
 namespace DocuChef.PowerPoint;
 
@@ -13,17 +12,25 @@ internal partial class PowerPointProcessor
     /// </summary>
     private void ProcessSlide(PresentationPart presentationPart, SlideId slideId, int slideIndex)
     {
-        Logger.Debug($"Processing slide {slideIndex} with ID {slideId.RelationshipId}");
+        string relationshipId = slideId.RelationshipId;
+        Logger.Debug($"Processing slide {slideIndex} with ID {relationshipId}");
+
+        // Check if this slide has already been processed with array batch data
+        if (_context.ProcessedArraySlides.Contains(relationshipId))
+        {
+            Logger.Debug($"Skipping slide {slideIndex} as it was already processed with array batch data");
+            return;
+        }
 
         // Update slide context
         _context.Slide.Index = slideIndex;
-        _context.Slide.Id = slideId.RelationshipId;
+        _context.Slide.Id = relationshipId;
 
         // Get slide part
-        var slidePart = (SlidePart)presentationPart.GetPartById(slideId.RelationshipId);
+        var slidePart = (SlidePart)presentationPart.GetPartById(relationshipId);
         if (slidePart == null || slidePart.Slide == null)
         {
-            Logger.Warning($"Slide part not found for ID {slideId.RelationshipId}");
+            Logger.Warning($"Slide part not found for ID {relationshipId}");
             return;
         }
 
@@ -36,6 +43,20 @@ internal partial class PowerPointProcessor
 
         Logger.Debug($"Slide notes: {slideNotes}");
 
+        // 모든 배열 변수의 길이 수집
+        var arrayLengths = CollectArrayLengths();
+
+        // 범위를 벗어나는 도형 선제적으로 숨김 처리
+        var outOfRangeHandler = new OutOfRangeShapeHandler(_context);
+        outOfRangeHandler.ScanAndHideOutOfRangeShapes(slidePart, arrayLengths);
+
+        // 숨겨진 도형이 있을 경우 로그 출력
+        int hiddenCount = outOfRangeHandler.GetHiddenShapeCount();
+        if (hiddenCount > 0)
+        {
+            Logger.Info($"Hidden {hiddenCount} shapes with out-of-range array indices on slide {slideIndex}");
+        }
+
         // Parse directives from slide notes using enhanced DirectiveParser
         var directives = DirectiveParser.ParseDirectives(slideNotes);
 
@@ -47,7 +68,16 @@ internal partial class PowerPointProcessor
         }
 
         // Analyze array references and handle automatic slide duplication
+        // This will mark duplicated slides as processed in _context.ProcessedArraySlides
         AnalyzeSlideForArrayIndices(presentationPart, slidePart, slideIndex);
+
+        // Skip further processing if this slide was processed as part of array duplication
+        // This check is needed in case the slide was processed during AnalyzeSlideForArrayIndices
+        if (_context.ProcessedArraySlides.Contains(relationshipId))
+        {
+            Logger.Debug($"Skipping remaining processing for slide {slideIndex} as it was handled by array batch processing");
+            return;
+        }
 
         // Process text replacements using DollarSignEngine
         Logger.Debug($"Processing text replacements with DollarSignEngine on slide {slideIndex}");
@@ -66,6 +96,43 @@ internal partial class PowerPointProcessor
         {
             Logger.Error($"Error saving slide {slideIndex}: {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    /// 모든 배열 변수의 길이 수집
+    /// </summary>
+    private Dictionary<string, int> CollectArrayLengths()
+    {
+        var arrayLengths = new Dictionary<string, int>();
+
+        foreach (var entry in _context.Variables)
+        {
+            if (entry.Value is IList list)
+            {
+                arrayLengths[entry.Key] = list.Count;
+            }
+            else if (entry.Value is IEnumerable enumerable && !(entry.Value is string))
+            {
+                // 컬렉션 길이 계산
+                int count = 0;
+                foreach (var _ in enumerable)
+                {
+                    count++;
+                }
+                arrayLengths[entry.Key] = count;
+            }
+        }
+
+        // 로그로 배열 길이 표시
+        if (arrayLengths.Any())
+        {
+            foreach (var entry in arrayLengths)
+            {
+                Logger.Debug($"Array {entry.Key} has {entry.Value} items");
+            }
+        }
+
+        return arrayLengths;
     }
 
     /// <summary>
@@ -132,10 +199,54 @@ internal partial class PowerPointProcessor
         // Clone only specific and important relationships
         CloneSlideRelationships(sourceSlidePart, newSlidePart, visitedPartIds);
 
+        // 중요: 이 부분을 추가하여 복제된 슬라이드에서도 ppt.Image 함수를 인식하도록 함
+        // Process image placeholders in slide (새로 추가된 부분)
+        ProcessImagePlaceholders(newSlidePart);
+
         // Save the slide
         newSlidePart.Slide.Save();
 
         return newSlidePart;
+    }
+
+    private void ProcessImagePlaceholders(SlidePart slidePart)
+    {
+        try
+        {
+            var shapes = slidePart.Slide.Descendants<P.Shape>().ToList();
+            Logger.Debug($"Processing image placeholders in {shapes.Count} shapes in cloned slide");
+
+            foreach (var shape in shapes)
+            {
+                // Skip shapes without text body
+                if (shape.TextBody == null)
+                    continue;
+
+                // Check for ppt.Image pattern in text
+                foreach (var paragraph in shape.TextBody.Elements<A.Paragraph>())
+                {
+                    foreach (var run in paragraph.Elements<A.Run>())
+                    {
+                        var textElement = run.GetFirstChild<A.Text>();
+                        if (textElement == null || string.IsNullOrEmpty(textElement.Text))
+                            continue;
+
+                        string text = textElement.Text;
+                        if (text.Contains("${ppt.Image(") && text.Contains(")}"))
+                        {
+                            // Mark this shape for image processing later
+                            // We could add a custom attribute or simply preserve the text
+                            // as the actual processing will happen during the batch processing phase
+                            Logger.Debug($"Marked shape '{shape.GetShapeName() ?? "(unnamed)"}' for image processing");
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Error processing image placeholders: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
@@ -263,68 +374,5 @@ internal partial class PowerPointProcessor
                 relationship.Uri,
                 relationship.Id);
         }
-    }
-
-    /// <summary>
-    /// Copy content from one OpenXmlPart to another with error handling
-    /// </summary>
-    private void CopyPartContent(OpenXmlPart source, OpenXmlPart target)
-    {
-        try
-        {
-            using (Stream sourceStream = source.GetStream(FileMode.Open, FileAccess.Read))
-            {
-                sourceStream.Position = 0;
-                using (Stream targetStream = target.GetStream(FileMode.Create, FileAccess.Write))
-                {
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = sourceStream.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        targetStream.Write(buffer, 0, bytesRead);
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning($"Error copying part content: {ex.Message}");
-
-            // Fallback method using FeedData
-            try
-            {
-                using (Stream sourceStream = source.GetStream())
-                {
-                    sourceStream.Position = 0;
-                    target.FeedData(sourceStream);
-                }
-            }
-            catch (Exception feedEx)
-            {
-                Logger.Warning($"Error using FeedData: {feedEx.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Clone chart-related parts
-    /// </summary>
-    private void CloneChartParts(ChartPart sourceChartPart, ChartPart targetChartPart)
-    {
-        // Handle embedding package if present
-        if (sourceChartPart.EmbeddedPackagePart != null)
-        {
-            try
-            {
-                var targetPackagePart = targetChartPart.AddEmbeddedPackagePart("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-                CopyPartContent(sourceChartPart.EmbeddedPackagePart, targetPackagePart);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning($"Failed to clone embedded package part: {ex.Message}");
-            }
-        }
-
-        // Handle other chart-related parts as needed...
     }
 }

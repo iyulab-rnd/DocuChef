@@ -83,7 +83,7 @@ try
 
     // Create Items array
     var items = new List<Item>();
-    for (int i = 1; i <= 7; i++)
+    for (int i = 1; i <= 13; i++)
     {
         items.Add(new Item
         {

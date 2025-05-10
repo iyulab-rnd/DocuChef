@@ -78,7 +78,7 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
             return;
         }
 
-        // 2. 배열별 슬라이드 복제 필요 여부 판단
+        // 2. 배열별 처리
         foreach (var arrayGroup in arrayReferences.GroupBy(r => r.ArrayName))
         {
             string arrayName = arrayGroup.Key;
@@ -96,6 +96,11 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
 
             int totalItems = CollectionHelper.GetCollectionCount(arrayObj);
             Logger.Debug($"Array '{arrayName}' has {totalItems} total items, {itemsPerSlide} items per slide");
+
+            // 중요: 항상 원본 슬라이드의 범위를 벗어난 항목 숨김 처리
+            // Items.Count가 디자인된 요소보다 적은 경우에도 적용
+            HideOutOfRangeItems(slidePart, arrayName, 0, totalItems);
+            Logger.Debug($"Applied range check to original slide for array '{arrayName}'");
 
             // 복제 필요 여부 판단
             if (totalItems <= itemsPerSlide)
@@ -133,9 +138,6 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
                 // 처리된 슬라이드로 표시
                 _context.ProcessedArraySlides.Add(presentationPart.GetIdOfPart(newSlidePart));
             }
-
-            // 원본 슬라이드에도 범위 체크 적용
-            HideOutOfRangeItems(slidePart, arrayName, 0, totalItems);
         }
 
         // 변경 사항 저장
@@ -194,7 +196,7 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
     }
 
     /// <summary>
-    /// Hide shapes with out-of-range array indices
+    /// Hide shapes with out-of-range array indices, ensuring all items beyond total count are hidden
     /// </summary>
     private void HideOutOfRangeItems(SlidePart slidePart, string arrayName, int startIndex, int totalItems)
     {
@@ -217,10 +219,29 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
             // 범위를 벗어난 참조가 있으면 숨김
             foreach (var reference in references)
             {
+                // 실제 인덱스 계산 (복제된 슬라이드의 경우 오프셋 적용된 인덱스와 비교)
                 int actualIndex = reference.Index;
+
+                // 원본 배열 크기와 비교하여 숨김 처리
                 if (actualIndex >= totalItems)
                 {
                     Logger.Debug($"Hiding shape '{shape.GetShapeName()}' with reference to {arrayName}[{actualIndex}] (>= {totalItems})");
+                    PowerPointShapeHelper.HideShape(shape);
+                    hiddenShapeCount++;
+                    break;
+                }
+
+                // 추가: 현재 슬라이드 배치에서 표시할 수 있는 범위를 벗어난 경우도 숨김
+                // startIndex ~ startIndex + (slidesPerBatch - 1) 범위만 표시
+                int slidesPerBatch = GetSlidesPerBatch(slidePart, arrayName);
+                int batchEndIndex = startIndex + slidesPerBatch - 1;
+
+                // 로컬 인덱스 계산 (복제된 슬라이드에 표시되는 항목의 로컬 인덱스)
+                int localIndex = actualIndex - startIndex;
+
+                if (localIndex < 0 || localIndex >= slidesPerBatch)
+                {
+                    Logger.Debug($"Hiding shape '{shape.GetShapeName()}' with out-of-batch index: {arrayName}[{actualIndex}] (local index {localIndex} outside of batch 0-{slidesPerBatch - 1})");
                     PowerPointShapeHelper.HideShape(shape);
                     hiddenShapeCount++;
                     break;
@@ -230,6 +251,22 @@ internal partial class PowerPointProcessor : IExpressionEvaluator
 
         Logger.Debug($"Hidden {hiddenShapeCount} shapes with out-of-range references");
         slidePart.Slide.Save();
+    }
+
+    /// <summary>
+    /// Get number of items per batch for the given slide and array
+    /// </summary>
+    private int GetSlidesPerBatch(SlidePart slidePart, string arrayName)
+    {
+        // 이 슬라이드에서 해당 배열의 인덱스 참조를 모두 찾아 최대값 + 1 반환
+        var references = FindArrayReferencesInSlide(slidePart)
+                        .Where(r => r.ArrayName == arrayName)
+                        .ToList();
+
+        if (!references.Any())
+            return 0;
+
+        return references.Max(r => r.Index) + 1;
     }
 
     /// <summary>
